@@ -215,7 +215,14 @@ export function computeDashboardStats(audits) {
     u.nnSum += summary.modules.NURSE_NOTE?.pct ?? 0;
 
     if (!u.roomsMap.has(roomName)) {
-      u.roomsMap.set(roomName, { room: roomName, count: 0, overallSum: 0, nnSum: 0 });
+      u.roomsMap.set(roomName, {
+        unit: unitName,
+        room: roomName,
+        count: 0,
+        overallSum: 0,
+        nnSum: 0,
+        itemStats: new Map(), // itemId -> { id, label, moduleCode, sectionTitle, evaluated, failed }
+      });
     }
     const r = u.roomsMap.get(roomName);
     r.count += 1;
@@ -232,15 +239,32 @@ export function computeDashboardStats(audits) {
     d.overallSum += summary.overallPct ?? 0;
     d.nnSum += summary.modules.NURSE_NOTE?.pct ?? 0;
 
-    // Deficiencies
+    // Deficiencies (global + per-room item stats)
     const answers = audit.answers || {};
     for (const [itemId, val] of Object.entries(answers)) {
       const meta = itemsMap.get(itemId);
       if (!meta) continue;
       if (meta.moduleCode !== 'NURSE_NOTE' && !(audit.selectedModules || []).includes(meta.moduleCode)) continue;
       const opt = meta.options.find((o) => o.value === String(val));
-      if (!opt) continue;
-      if (opt.kind === 'fail' || (meta.moduleCode === 'HAIT' && opt.kind === 'partial')) {
+      if (!opt || opt.kind === 'na') continue;
+
+      // Track room-level evaluated & failed counts (excluding N/A)
+      if (!r.itemStats.has(itemId)) {
+        r.itemStats.set(itemId, {
+          id: itemId,
+          label: meta.label,
+          moduleCode: meta.moduleCode,
+          sectionTitle: meta.sectionTitle,
+          evaluated: 0,
+          failed: 0,
+        });
+      }
+      const stat = r.itemStats.get(itemId);
+      stat.evaluated += 1;
+
+      const isDeficient = opt.kind === 'fail' || (meta.moduleCode === 'HAIT' && opt.kind === 'partial');
+      if (isDeficient) {
+        stat.failed += 1;
         if (!defMap.has(itemId)) {
           defMap.set(itemId, {
             id: itemId,
@@ -262,15 +286,58 @@ export function computeDashboardStats(audits) {
       avgOverall: Math.round((u.overallSum / u.count) * 10) / 10,
       avgNurseNote: Math.round((u.nnSum / u.count) * 10) / 10,
       rooms: Array.from(u.roomsMap.values())
-        .map((r) => ({
-          room: r.room,
-          count: r.count,
-          avgOverall: Math.round((r.overallSum / r.count) * 10) / 10,
-          avgNurseNote: Math.round((r.nnSum / r.count) * 10) / 10,
-        }))
-        .sort((a, b) => b.avgOverall - a.avgOverall),
+        .map((r) => {
+          // Group deficient items by moduleCode + sectionTitle
+          const secMap = new Map();
+          let totalDeficientItems = 0;
+          for (const st of r.itemStats.values()) {
+            const secKey = `${st.moduleCode}::${st.sectionTitle}`;
+            if (!secMap.has(secKey)) {
+              secMap.set(secKey, {
+                moduleCode: st.moduleCode,
+                sectionTitle: st.sectionTitle,
+                evaluatedTotal: 0,
+                failedTotal: 0,
+                items: [],
+              });
+            }
+            const secObj = secMap.get(secKey);
+            secObj.evaluatedTotal += st.evaluated;
+            secObj.failedTotal += st.failed;
+            if (st.failed > 0) {
+              totalDeficientItems += 1;
+              secObj.items.push({
+                id: st.id,
+                label: st.label,
+                failed: st.failed,
+                evaluated: st.evaluated,
+                deficiencyPct: Math.round((st.failed / st.evaluated) * 1000) / 10,
+              });
+            }
+          }
+          const deficientSections = Array.from(secMap.values())
+            .filter((s) => s.items.length > 0)
+            .map((s) => ({
+              ...s,
+              sectionDeficiencyPct:
+                s.evaluatedTotal > 0 ? Math.round((s.failedTotal / s.evaluatedTotal) * 1000) / 10 : 0,
+              items: s.items.sort((a, b) => b.deficiencyPct - a.deficiencyPct || b.failed - a.failed),
+            }))
+            .sort((a, b) => b.sectionDeficiencyPct - a.sectionDeficiencyPct);
+
+          return {
+            unit: r.unit,
+            room: r.room,
+            count: r.count,
+            avgOverall: Math.round((r.overallSum / r.count) * 10) / 10,
+            avgNurseNote: Math.round((r.nnSum / r.count) * 10) / 10,
+            totalDeficientItems,
+            deficientSections,
+          };
+        })
+        .sort((a, b) => a.avgOverall - b.avgOverall),
     }))
-    .sort((a, b) => b.avgOverall - a.avgOverall);
+    .sort((a, b) => a.avgOverall - b.avgOverall);
 
   const byDate = Array.from(dateMap.values())
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -300,4 +367,45 @@ export function computeDashboardStats(audits) {
     byDate,
     topDeficiencies,
   };
+}
+
+// Single-audit deficiency breakdown grouped by Section with % deficient per section
+export function computeSingleAuditDeficienciesBySection(audit) {
+  const itemsMap = getAllItemsMap();
+  const secMap = new Map();
+  const answers = audit.answers || {};
+  const selected = audit.selectedModules || [];
+
+  for (const [itemId, val] of Object.entries(answers)) {
+    const meta = itemsMap.get(itemId);
+    if (!meta) continue;
+    if (meta.moduleCode !== 'NURSE_NOTE' && !selected.includes(meta.moduleCode)) continue;
+    const opt = meta.options.find((o) => o.value === String(val));
+    if (!opt || opt.kind === 'na') continue;
+
+    const secKey = `${meta.moduleCode}::${meta.sectionTitle}`;
+    if (!secMap.has(secKey)) {
+      secMap.set(secKey, {
+        moduleCode: meta.moduleCode,
+        sectionTitle: meta.sectionTitle,
+        evaluated: 0,
+        failed: 0,
+        items: [],
+      });
+    }
+    const sec = secMap.get(secKey);
+    sec.evaluated += 1;
+    if (opt.kind === 'fail' || (meta.moduleCode === 'HAIT' && opt.kind === 'partial')) {
+      sec.failed += 1;
+      sec.items.push({ label: meta.label, val: opt.label });
+    }
+  }
+
+  return Array.from(secMap.values())
+    .filter((s) => s.failed > 0)
+    .map((s) => ({
+      ...s,
+      deficiencyPct: s.evaluated > 0 ? Math.round((s.failed / s.evaluated) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.deficiencyPct - a.deficiencyPct);
 }

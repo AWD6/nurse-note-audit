@@ -12,6 +12,7 @@ import {
 import {
   computeAuditSummary,
   computeDashboardStats,
+  computeSingleAuditDeficienciesBySection,
   PASS_THRESHOLD,
   formatThaiDate,
   getTodayIso,
@@ -768,30 +769,21 @@ function renderRiskStep() {
 }
 
 function renderSummaryStep(summary) {
-  const itemsMap = getAllItemsMap();
-  const failedItems = [];
-  for (const [id, val] of Object.entries(draft.answers)) {
-    const meta = itemsMap.get(id);
-    if (!meta) continue;
-    if (meta.moduleCode !== 'NURSE_NOTE' && !draft.selectedModules.includes(meta.moduleCode)) continue;
-    const opt = meta.options.find((o) => o.value === String(val));
-    if (opt && (opt.kind === 'fail' || opt.kind === 'partial')) {
-      failedItems.push({ label: meta.label, val: opt.label, moduleCode: meta.moduleCode });
-    }
-  }
+  const defSections = computeSingleAuditDeficienciesBySection(draft);
+  const totalFailed = defSections.reduce((acc, s) => acc + s.failed, 0);
 
   return `
     <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
       <div class="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-100">
         <div>
-          <h2 class="text-base sm:text-lg font-bold text-slate-900">สรุปผลการประเมิน</h2>
-          <p class="text-xs text-slate-500 mt-0.5">
-            ID <strong class="font-mono">${esc(draft.nnId)}</strong> • ${formatThaiDate(draft.auditDate)} • ${esc(draft.unit || '-')} / ${esc(getEffectiveDraftRoom() || '-')}
+          <h2 class="text-lg sm:text-xl font-bold text-slate-900">สรุปผลการประเมิน</h2>
+          <p class="text-sm text-slate-500 mt-0.5">
+            <strong class="text-brand-700">${esc(draft.unit || '-')} › ${esc(getEffectiveDraftRoom() || '-')}</strong> • ID <strong class="font-mono">${esc(draft.nnId)}</strong> • ${formatThaiDate(draft.auditDate)}
           </p>
         </div>
         <div class="text-right">
           <div class="text-3xl font-bold ${summary.passed ? 'text-emerald-600' : 'text-rose-600'}">${summary.overallPct ?? '-'}%</div>
-          <div class="text-[11px] text-slate-400">${summary.passed ? 'ผ่านเกณฑ์ (≥80%)' : 'ต้องปรับปรุง (<80%)'}</div>
+          <div class="text-xs text-slate-500">${summary.passed ? 'ผ่านเกณฑ์ (≥80%)' : 'ต้องปรับปรุง (<80%)'}</div>
         </div>
       </div>
 
@@ -799,11 +791,11 @@ function renderSummaryStep(summary) {
         ${Object.entries(summary.modules)
           .map(
             ([code, m]) => `
-          <div class="rounded-xl border border-slate-100 bg-slate-50/70 p-3.5">
-            <div class="text-xs text-slate-500">${MODULE_META[code].shortName}</div>
-            <div class="text-xl font-bold mt-1 ${m.pct === null ? 'text-slate-400' : m.pct >= PASS_THRESHOLD ? 'text-emerald-600' : 'text-rose-600'}">${m.pct ?? '-'}%</div>
-            <div class="text-[11px] text-slate-400 mt-0.5">
-              ${code === 'HAIT' ? `${m.score}/${m.maxApplicable} คะแนน` : `ผ่าน ${m.pass} • ไม่ผ่าน ${m.fail}`}
+          <div class="rounded-xl border border-slate-100 bg-slate-50/70 p-4">
+            <div class="text-xs sm:text-sm text-slate-500 font-medium">${MODULE_META[code].shortName}</div>
+            <div class="text-2xl font-bold mt-1 ${m.pct === null ? 'text-slate-400' : m.pct >= PASS_THRESHOLD ? 'text-emerald-600' : 'text-rose-600'}">${m.pct ?? '-'}%</div>
+            <div class="text-xs text-slate-400 mt-0.5">
+              ${code === 'HAIT' ? `${m.score}/${m.maxApplicable} คะแนน` : `ผ่าน ${m.pass} • พร่อง ${m.fail}`}
             </div>
           </div>
         `
@@ -812,19 +804,41 @@ function renderSummaryStep(summary) {
       </div>
 
       ${
-        failedItems.length > 0
+        defSections.length > 0
           ? `
-        <div class="rounded-xl border border-rose-100 bg-rose-50/50 p-4">
-          <h3 class="text-xs font-bold text-rose-800 mb-2">ข้อบกพร่องที่พบ (${failedItems.length} รายการ)</h3>
-          <ul class="space-y-1 text-xs text-rose-900 list-disc pl-5 max-h-44 overflow-y-auto">
-            ${failedItems.map((f) => `<li><strong>[${MODULE_META[f.moduleCode].shortName}]</strong> ${esc(f.label)} (${esc(f.val)})</li>`).join('')}
-          </ul>
+        <div class="rounded-2xl border border-rose-200/80 bg-rose-50/50 p-4 sm:p-5 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-sm sm:text-base font-bold text-rose-900">
+              ประเด็นที่ยังพร่องของ ${esc(draft.unit || '-')} › ${esc(getEffectiveDraftRoom() || '-')} (${totalFailed} ข้อ)
+            </h3>
+          </div>
+          <div class="space-y-2.5">
+            ${defSections
+              .map(
+                (sec) => `
+              <div class="bg-white rounded-xl border border-rose-100 p-3.5 space-y-1.5">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="text-sm font-bold text-slate-800">
+                    <span class="text-brand-700">[${MODULE_META[sec.moduleCode].shortName}]</span> ${esc(sec.sectionTitle)}
+                  </div>
+                  <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                    พร่อง ${sec.deficiencyPct}% (${sec.failed}/${sec.evaluated} ข้อ)
+                  </span>
+                </div>
+                <ul class="space-y-1 text-sm text-slate-700 list-disc pl-5">
+                  ${sec.items.map((it) => `<li>${highlightKeywords(it.label)} <span class="text-rose-600 font-medium">(${esc(it.val)})</span></li>`).join('')}
+                </ul>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
         </div>
       `
           : `
-        <div class="rounded-xl border border-emerald-100 bg-emerald-50/60 p-3.5 text-xs font-medium text-emerald-700 flex items-center gap-2">
-          <i data-lucide="check-circle-2" class="w-4 h-4"></i>
-          ไม่พบข้อบกพร่องในข้อที่ประเมินทั้งหมด
+        <div class="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm font-medium text-emerald-800 flex items-center gap-2">
+          <i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-600"></i>
+          ครบถ้วน 100% — ไม่พบข้อบกพร่องในข้อที่ประเมินทั้งหมด
         </div>
       `
       }
@@ -1212,9 +1226,108 @@ function renderDashboardView() {
         </div>
       </div>
 
+      <!-- Room-by-Room Deficiency Feedback Report (Actionable for sending to each room) -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-base sm:text-lg font-bold text-slate-900">สรุปจุดที่ยังพร่อง แยกรายหน่วย › ห้องตรวจ</h3>
+            <p class="text-xs sm:text-sm text-slate-500 mt-0.5">แสดงหัวข้อและข้อที่ยังพร่องพร้อมร้อยละ (%) ตามเกณฑ์ เพื่อส่งให้แต่ละห้องตรวจนำไปปรับปรุงแก้ไข</p>
+          </div>
+        </div>
+
+        ${
+          stats.byUnit.length === 0
+            ? '<p class="text-sm text-slate-400">ยังไม่มีข้อมูลในเงื่อนไขที่เลือก</p>'
+            : `
+          <div class="space-y-4">
+            ${stats.byUnit
+              .flatMap((u) => u.rooms)
+              .sort((a, b) => a.avgOverall - b.avgOverall)
+              .map((r) => {
+                const roomKey = `${r.unit}|||${r.room}`;
+                return `
+                  <div class="rounded-2xl border ${r.deficientSections.length > 0 ? 'border-rose-200/80 bg-rose-50/20' : 'border-emerald-200/80 bg-emerald-50/20'} overflow-hidden">
+                    <div class="px-4 sm:px-5 py-3.5 bg-white border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-base font-bold text-slate-900">${esc(r.unit)} › ${esc(r.room)}</span>
+                          <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600">${r.count} ชาร์ต</span>
+                          <span class="text-xs font-bold px-2.5 py-0.5 rounded-full ${scoreBadgeClass(r.avgOverall)}">รวม ${r.avgOverall}%</span>
+                          <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full ${scoreBadgeClass(r.avgNurseNote)}">Nurse Note ${r.avgNurseNote}%</span>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          data-copy-room="${esc(roomKey)}"
+                          class="btn-copy-room px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs sm:text-sm font-semibold text-slate-700 flex items-center gap-1.5 transition"
+                        >
+                          <i data-lucide="copy" class="w-3.5 h-3.5 text-brand-700"></i>
+                          คัดลอกส่งห้องตรวจ
+                        </button>
+                        <button
+                          type="button"
+                          data-pdf-room="${esc(roomKey)}"
+                          class="btn-pdf-room px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs sm:text-sm font-semibold text-white flex items-center gap-1.5 transition"
+                        >
+                          <i data-lucide="file-down" class="w-3.5 h-3.5"></i>
+                          PDF ห้องนี้
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="p-4 sm:p-5">
+                      ${
+                        r.deficientSections.length === 0
+                          ? `<p class="text-sm text-emerald-700 font-medium flex items-center gap-1.5"><i data-lucide="check-circle-2" class="w-4 h-4"></i> บันทึกครบถ้วนดีมาก ไม่พบข้อที่ยังพร่อง</p>`
+                          : `
+                        <div class="space-y-3">
+                          ${r.deficientSections
+                            .map(
+                              (sec) => `
+                            <div class="bg-white rounded-xl border border-slate-200/80 p-3.5 space-y-2">
+                              <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div class="text-sm sm:text-base font-bold text-slate-900">
+                                  <span class="text-brand-700">[${MODULE_META[sec.moduleCode].shortName}]</span> ${esc(sec.sectionTitle)}
+                                </div>
+                                <span class="text-xs font-bold px-2.5 py-1 rounded-full bg-rose-100 text-rose-700">
+                                  หัวข้อนี้พร่อง ${sec.sectionDeficiencyPct}% (${sec.failedTotal}/${sec.evaluatedTotal})
+                                </span>
+                              </div>
+                              <div class="divide-y divide-slate-100">
+                                ${sec.items
+                                  .map(
+                                    (it) => `
+                                  <div class="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-sm">
+                                    <span class="text-slate-700 leading-relaxed">${highlightKeywords(it.label)}</span>
+                                    <span class="text-xs sm:text-sm font-bold text-rose-600 shrink-0">
+                                      พร่อง ${it.deficiencyPct}% (${it.failed}/${it.evaluated} ชาร์ต)
+                                    </span>
+                                  </div>
+                                `
+                                  )
+                                  .join('')}
+                              </div>
+                            </div>
+                          `
+                            )
+                            .join('')}
+                        </div>
+                      `
+                      }
+                    </div>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        `
+        }
+      </div>
+
       <!-- Top Deficiencies (Minimal CQI List) -->
       <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5">
-        <h3 class="text-sm font-bold text-slate-800 mb-3">ประเด็นที่ขาดการบันทึก / ไม่ถูกต้องบ่อยที่สุด (CQI)</h3>
+        <h3 class="text-base font-bold text-slate-800 mb-3">ภาพรวมประเด็นที่ขาดการบันทึก / ไม่ถูกต้องบ่อยที่สุด (CQI)</h3>
         ${
           stats.topDeficiencies.length === 0
             ? '<p class="text-xs text-emerald-700 bg-emerald-50/70 p-3.5 rounded-xl">ไม่พบข้อบกพร่องในชุดข้อมูลที่เลือก</p>'
@@ -1496,6 +1609,112 @@ function bindDashboardEvents() {
   document.getElementById('btn-dash-pdf')?.addEventListener('click', () => {
     exportDashboardPdf();
   });
+
+  const findRoomObj = (key) => {
+    const [unit, room] = String(key || '').split('|||');
+    const stats = computeDashboardStats(getFilteredAuditsForDash());
+    for (const u of stats.byUnit) {
+      for (const r of u.rooms) {
+        if (r.unit === unit && r.room === room) return r;
+      }
+    }
+    return null;
+  };
+
+  document.querySelectorAll('.btn-copy-room').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const r = findRoomObj(btn.dataset.copyRoom);
+      if (!r) return;
+      const lines = [
+        `📋 สรุปผลการประเมินเวชระเบียนและ Nurse Note`,
+        `🏥 ${r.unit} › ${r.room} (จำนวน ${r.count} ชาร์ต)`,
+        `📊 ความสมบูรณ์รวม: ${r.avgOverall}% | Nurse Note: ${r.avgNurseNote}%`,
+        '',
+      ];
+      if (r.deficientSections.length === 0) {
+        lines.push('✅ บันทึกครบถ้วนดีมาก ไม่พบข้อบกพร่อง');
+      } else {
+        lines.push('⚠️ ประเด็นที่ยังพร่อง (สำหรับนำไปปรับปรุงแก้ไข):');
+        for (const sec of r.deficientSections) {
+          lines.push(`\n• [${MODULE_META[sec.moduleCode].shortName}] ${sec.sectionTitle} (พร่อง ${sec.sectionDeficiencyPct}%)`);
+          for (const it of sec.items) {
+            lines.push(`   - ${it.label} → พร่อง ${it.deficiencyPct}% (${it.failed}/${it.evaluated} ชาร์ต)`);
+          }
+        }
+      }
+      await navigator.clipboard.writeText(lines.join('\n'));
+      showToast(`คัดลอกสรุปจุดบกพร่องของ ${r.room} แล้ว พร้อมวางส่ง LINE`);
+    });
+  });
+
+  document.querySelectorAll('.btn-pdf-room').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const r = findRoomObj(btn.dataset.pdfRoom);
+      if (r) exportRoomFeedbackPdf(r);
+    });
+  });
+}
+
+function exportRoomFeedbackPdf(r) {
+  const html = `
+    <div style="font-family: 'IBM Plex Sans Thai', sans-serif; color: #0f172a;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom:2px solid #0f766e; padding-bottom:10px; margin-bottom:16px;">
+        <div>
+          <h1 style="font-size:18px; font-weight:700; margin:0;">ใบแจ้งผลการประเมินและจุดที่ควรปรับปรุง (Feedback รายห้องตรวจ)</h1>
+          <p style="font-size:13px; color:#0f766e; font-weight:700; margin:4px 0 0;">${esc(r.unit)} › ${esc(r.room)} • โรงพยาบาลมหาราชนครเชียงใหม่</p>
+        </div>
+        <div style="text-align:right; font-size:11px; color:#64748b;">วันที่ออกรายงาน: ${formatThaiDate(getTodayIso())}</div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px;">
+        <div style="border:1px solid #e2e8f0; border-radius:10px; padding:10px;">
+          <div style="font-size:11px; color:#64748b;">จำนวนชาร์ตที่ประเมิน</div>
+          <div style="font-size:20px; font-weight:700;">${r.count} ชาร์ต</div>
+        </div>
+        <div style="border:1px solid #e2e8f0; border-radius:10px; padding:10px;">
+          <div style="font-size:11px; color:#64748b;">ความสมบูรณ์เฉลี่ยรวม</div>
+          <div style="font-size:20px; font-weight:700; color:${r.avgOverall >= PASS_THRESHOLD ? '#0f766e' : '#e11d48'};">${r.avgOverall}%</div>
+        </div>
+        <div style="border:1px solid #e2e8f0; border-radius:10px; padding:10px;">
+          <div style="font-size:11px; color:#64748b;">เฉลี่ย Nurse Note</div>
+          <div style="font-size:20px; font-weight:700; color:${r.avgNurseNote >= PASS_THRESHOLD ? '#059669' : '#e11d48'};">${r.avgNurseNote}%</div>
+        </div>
+      </div>
+
+      <h2 style="font-size:14px; font-weight:700; margin:0 0 10px;">รายละเอียดหัวข้อและข้อที่ยังพร่องตามเกณฑ์</h2>
+      ${
+        r.deficientSections.length === 0
+          ? '<p style="font-size:13px; color:#059669; padding:12px; background:#ecfdf5; border-radius:8px;">บันทึกครบถ้วนดีมาก ไม่พบข้อบกพร่อง</p>'
+          : r.deficientSections
+              .map(
+                (sec) => `
+            <div style="border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:12px;" class="print-avoid-break">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong style="font-size:13px;">[${MODULE_META[sec.moduleCode].shortName}] ${esc(sec.sectionTitle)}</strong>
+                <span style="font-size:11px; font-weight:700; color:#be123c; background:#ffe4e6; padding:2px 8px; border-radius:99px;">หัวข้อนี้พร่อง ${sec.sectionDeficiencyPct}% (${sec.failedTotal}/${sec.evaluatedTotal})</span>
+              </div>
+              <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                <tbody>
+                  ${sec.items
+                    .map(
+                      (it) => `
+                    <tr style="border-top:1px solid #f1f5f9;">
+                      <td style="padding:5px 4px;">${esc(it.label)}</td>
+                      <td style="padding:5px 4px; text-align:right; font-weight:700; color:#e11d48; white-space:nowrap;">พร่อง ${it.deficiencyPct}% (${it.failed}/${it.evaluated} ชาร์ต)</td>
+                    </tr>
+                  `
+                    )
+                    .join('')}
+                </tbody>
+              </table>
+            </div>
+          `
+              )
+              .join('')
+      }
+    </div>
+  `;
+  triggerPdfPrint(html);
 }
 
 // ============================================================
