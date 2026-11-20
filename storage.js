@@ -13,7 +13,7 @@ export const GOOGLE_SHEET_CONFIG = {
   webAppUrl: 'https://script.google.com/macros/s/AKfycbx8zfjdu2tGHLe8J-QEdT54hOPHGVzr2ldOEbcCn7yoY30XFahA0FoXWK5exRcOd3OoyQ/exec',
 };
 
-const STORAGE_KEY = 'maharat_nurse_note_audits_v3';
+const STORAGE_KEY = 'maharat_nurse_note_audits_v4';
 
 function buildDemoAudits() {
   const fillPass = (sections, overrides = {}) => {
@@ -39,9 +39,10 @@ function buildDemoAudits() {
   return [
     {
       id: 'demo-1',
+      nnId: 'NN-691117-A101',
       isDemo: true,
       auditDate: '2026-11-17',
-      hn: '5810249',
+      hnEncrypted: '',
       patientType: 'old',
       gender: 'female',
       age: 48,
@@ -74,9 +75,10 @@ function buildDemoAudits() {
     },
     {
       id: 'demo-2',
+      nnId: 'NN-691118-B204',
       isDemo: true,
       auditDate: '2026-11-18',
-      hn: '6204815',
+      hnEncrypted: '',
       patientType: 'new',
       gender: 'male',
       age: 35,
@@ -106,9 +108,10 @@ function buildDemoAudits() {
     },
     {
       id: 'demo-3',
+      nnId: 'NN-691118-C309',
       isDemo: true,
       auditDate: '2026-11-18',
-      hn: '4901182',
+      hnEncrypted: '',
       patientType: 'old',
       gender: 'female',
       age: 67,
@@ -143,9 +146,10 @@ function buildDemoAudits() {
     },
     {
       id: 'demo-4',
+      nnId: 'NN-691119-D412',
       isDemo: true,
       auditDate: '2026-11-19',
-      hn: '6519304',
+      hnEncrypted: '',
       patientType: 'old',
       gender: 'male',
       age: 52,
@@ -163,9 +167,10 @@ function buildDemoAudits() {
     },
     {
       id: 'demo-5',
+      nnId: 'NN-691120-E518',
       isDemo: true,
       auditDate: '2026-11-20',
-      hn: '6108872',
+      hnEncrypted: '',
       patientType: 'old',
       gender: 'female',
       age: 59,
@@ -196,7 +201,7 @@ function savePartitionedIndex(audits) {
     if (!index[u][r]) index[u][r] = [];
     index[u][r].push(a);
   }
-  localStorage.setItem('maharat_nurse_note_partitioned_v3', JSON.stringify(index));
+  localStorage.setItem('maharat_nurse_note_partitioned_v4', JSON.stringify(index));
 }
 
 export function loadAudits() {
@@ -217,12 +222,16 @@ export function saveAudits(audits) {
 }
 
 export function upsertAudit(record) {
+  // PDPA safeguard: never persist plaintext hn
+  const sanitized = { ...record };
+  delete sanitized.hn;
+
   const audits = loadAudits();
-  const idx = audits.findIndex((a) => a.id === record.id);
+  const idx = audits.findIndex((a) => a.id === sanitized.id);
   if (idx >= 0) {
-    audits[idx] = { ...record, updatedAt: new Date().toISOString() };
+    audits[idx] = { ...sanitized, updatedAt: new Date().toISOString() };
   } else {
-    audits.unshift({ ...record, createdAt: new Date().toISOString() });
+    audits.unshift({ ...sanitized, createdAt: new Date().toISOString() });
   }
   saveAudits(audits);
   return audits;
@@ -241,13 +250,21 @@ export function clearDemoAudits() {
 }
 
 // ============================================================
-// Google Sheets Sync (Write & Read)
+// Google Sheets Sync (PDPA-Safe: sends Nurse Note ID, NEVER plaintext HN)
 // ============================================================
 export async function pushAuditToGoogleSheet(record, summary) {
   if (!GOOGLE_SHEET_CONFIG.webAppUrl) return { skipped: true };
   try {
+    // Strip plaintext HN; put Nurse Note ID in the ID/hn column so Sheet shows NN-ID only
+    const safeRecord = { ...record };
+    delete safeRecord.hn;
+
     const payload = {
-      record: { ...record, thaiDate: formatThaiDate(record.auditDate) },
+      record: {
+        ...safeRecord,
+        hn: safeRecord.nnId, // Column C on Google Sheet displays Nurse Note ID (PDPA safe)
+        thaiDate: formatThaiDate(safeRecord.auditDate),
+      },
       summary,
     };
     await fetch(GOOGLE_SHEET_CONFIG.webAppUrl, {
@@ -268,7 +285,13 @@ export async function pullAuditsFromGoogleSheet() {
     const res = await fetch(GOOGLE_SHEET_CONFIG.webAppUrl);
     const data = await res.json();
     if (data && Array.isArray(data.records)) {
-      return { ok: true, records: data.records };
+      const normalized = data.records.map((r) => {
+        const clean = { ...r };
+        if (!clean.nnId) clean.nnId = clean.hn || clean.id;
+        delete clean.hn;
+        return clean;
+      });
+      return { ok: true, records: normalized };
     }
     return { ok: false, records: [] };
   } catch (err) {
@@ -277,7 +300,7 @@ export async function pullAuditsFromGoogleSheet() {
 }
 
 // ============================================================
-// Excel Export (.xlsx)
+// Excel Export (.xlsx) — PDPA Safe (includes HN only if Admin unlocked)
 // ============================================================
 function sanitizeSheetName(name) {
   return String(name || 'Sheet')
@@ -285,11 +308,17 @@ function sanitizeSheetName(name) {
     .slice(0, 31);
 }
 
-function mapSummaryRow(a) {
+function mapSummaryRow(a, decryptedHnMap = null) {
   const s = computeAuditSummary(a);
-  return {
+  const row = {
     'วันที่ประเมิน (พ.ศ.)': formatThaiDate(a.auditDate),
-    HN: a.hn,
+    'Nurse Note ID': a.nnId || a.id,
+  };
+  if (decryptedHnMap) {
+    row['HN (Admin)'] = decryptedHnMap.get(a.id) || (a.hnEncrypted ? '(ถอดรหัสไม่ได้)' : '-');
+  }
+  return {
+    ...row,
     หน่วย: a.unit || '',
     ห้องตรวจ: a.room || '',
     ผู้ประเมิน: a.auditor || '',
@@ -305,12 +334,16 @@ function mapSummaryRow(a) {
   };
 }
 
-export function exportAuditsToExcel(audits, filenamePrefix = 'NurseNote_Audit') {
+export function exportAuditsToExcel(audits, filenamePrefix = 'NurseNote_Audit', decryptedHnMap = null) {
   if (!window.XLSX) return;
   const XLSX = window.XLSX;
   const wb = XLSX.utils.book_new();
 
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(audits.map(mapSummaryRow)), 'สรุปภาพรวม');
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.json_to_sheet(audits.map((a) => mapSummaryRow(a, decryptedHnMap))),
+    'สรุปภาพรวม'
+  );
 
   const groups = new Map();
   for (const a of audits) {
@@ -325,8 +358,15 @@ export function exportAuditsToExcel(audits, filenamePrefix = 'NurseNote_Audit') 
     let n = 2;
     while (used.has(name)) name = sanitizeSheetName(`${key.slice(0, 27)}_${n++}`);
     used.add(name);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list.map(mapSummaryRow)), name);
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.json_to_sheet(list.map((a) => mapSummaryRow(a, decryptedHnMap))),
+      name
+    );
   }
 
-  XLSX.writeFile(wb, `${filenamePrefix}_${formatThaiDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-')}.xlsx`);
+  XLSX.writeFile(
+    wb,
+    `${filenamePrefix}_${formatThaiDate(new Date().toISOString().slice(0, 10)).replace(/\//g, '-')}.xlsx`
+  );
 }

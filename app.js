@@ -29,6 +29,14 @@ import {
   pullAuditsFromGoogleSheet,
   exportAuditsToExcel,
 } from './storage.js';
+import {
+  generateNurseNoteId,
+  encryptHn,
+  decryptHn,
+  unlockAdmin,
+  lockAdmin,
+  isAdminUnlocked,
+} from './crypto.js';
 
 if (window.Chart && window.ChartDataLabels) {
   window.Chart.register(window.ChartDataLabels);
@@ -45,13 +53,28 @@ const THAI_MONTHS_SHORT = [
 let currentView = 'audit'; // 'audit' | 'dashboard' | 'history'
 let audits = loadAudits();
 let chartInstances = {};
+let decryptedHnCache = new Map(); // RAM-only decrypted HN cache when Admin unlocked
+
+async function refreshDecryptedHnCache() {
+  decryptedHnCache.clear();
+  if (!isAdminUnlocked()) return;
+  for (const a of audits) {
+    if (a.hnEncrypted) {
+      const plain = await decryptHn(a.hnEncrypted);
+      if (plain) decryptedHnCache.set(a.id, plain);
+    }
+  }
+}
 
 function createBlankDraft(keepContext = null) {
+  const dateIso = keepContext?.auditDate || getTodayIso();
   return {
     id: 'audit-' + Date.now(),
+    nnId: generateNurseNoteId(dateIso),
     isNew: true,
-    auditDate: keepContext?.auditDate || getTodayIso(),
-    hn: '',
+    auditDate: dateIso,
+    hnInput: '',
+    hnEncrypted: '',
     patientType: 'old',
     gender: '',
     age: '',
@@ -277,7 +300,7 @@ function renderAuditView() {
       <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-xs px-4 py-3 sticky top-[72px] z-20">
         <div class="flex flex-wrap items-center justify-between gap-2.5">
           <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-            <span class="font-bold text-slate-900">HN <span id="sticky-hn">${draft.hn ? esc(draft.hn) : '—'}</span></span>
+            <span class="font-bold text-slate-900 font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md">${esc(draft.nnId)}</span>
             <span class="text-slate-300">•</span>
             <span class="text-slate-500">${formatThaiDate(draft.auditDate)}</span>
             ${
@@ -338,7 +361,7 @@ function renderAuditView() {
           class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
         >
           <i data-lucide="plus" class="w-4 h-4"></i>
-          บันทึก &amp; ประเมิน HN ถัดไป
+          บันทึก &amp; ประเมินรายถัดไป
         </button>
       </div>
     </div>
@@ -371,8 +394,14 @@ function renderStepInfo() {
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">HN <span class="text-rose-500">*</span></label>
-          <input id="inp-hn" type="text" placeholder="ระบุเลข HN" value="${esc(draft.hn)}" class="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
+          <label class="block text-xs font-medium text-slate-500 mb-1.5">
+            HN <span class="text-slate-400 font-normal">(ไม่บังคับ • เข้ารหัส PDPA)</span>
+          </label>
+          <input id="inp-hn" type="text" placeholder="ไม่บังคับ — ส่งขึ้น Sheet เป็น ${esc(draft.nnId)}" value="${esc(draft.hnInput || '')}" class="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
+          <p class="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+            <i data-lucide="lock" class="w-3 h-3 text-emerald-600"></i>
+            <span>Nurse Note ID: <strong class="font-mono text-slate-600">${esc(draft.nnId)}</strong></span>
+          </p>
         </div>
 
         <div>
@@ -684,7 +713,7 @@ function renderSummaryStep(summary) {
         <div>
           <h2 class="text-base sm:text-lg font-bold text-slate-900">สรุปผลการประเมิน</h2>
           <p class="text-xs text-slate-500 mt-0.5">
-            HN <strong>${esc(draft.hn || '-')}</strong> • ${formatThaiDate(draft.auditDate)} • ${esc(draft.unit || '-')} / ${esc(getEffectiveDraftRoom() || '-')}
+            ID <strong class="font-mono">${esc(draft.nnId)}</strong> • ${formatThaiDate(draft.auditDate)} • ${esc(draft.unit || '-')} / ${esc(getEffectiveDraftRoom() || '-')}
           </p>
         </div>
         <div class="text-right">
@@ -782,9 +811,7 @@ function bindAuditEvents() {
   });
 
   document.getElementById('inp-hn')?.addEventListener('input', (e) => {
-    draft.hn = e.target.value;
-    const stickyHn = document.getElementById('sticky-hn');
-    if (stickyHn) stickyHn.textContent = draft.hn || '—';
+    draft.hnInput = e.target.value;
   });
   document.getElementById('inp-auditor')?.addEventListener('input', (e) => {
     draft.auditor = e.target.value;
@@ -910,30 +937,41 @@ function bindAuditEvents() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (!draft.hn.trim()) {
-      showToast('กรุณาระบุ HN', 'error');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-      document.getElementById('inp-hn')?.focus();
-      return;
+
+    // Encrypt optional HN with RSA-OAEP-256 Public Key (PDPA Safe — never store plaintext HN)
+    let hnEncrypted = draft.hnEncrypted || '';
+    if (draft.hnInput && draft.hnInput.trim()) {
+      hnEncrypted = await encryptHn(draft.hnInput.trim());
     }
-    const recordToSave = { ...draft, room: finalRoom, isNew: undefined, isDemo: false };
+
+    const nnId = draft.nnId || generateNurseNoteId(draft.auditDate);
+    const recordToSave = {
+      ...draft,
+      nnId,
+      hnEncrypted,
+      room: finalRoom,
+      isNew: undefined,
+      isDemo: false,
+    };
+    delete recordToSave.hnInput;
+    delete recordToSave.hn;
+
     const summary = computeAuditSummary(recordToSave);
     audits = upsertAudit(recordToSave);
+    await refreshDecryptedHnCache();
 
     const syncRes = await pushAuditToGoogleSheet(recordToSave, summary);
     const syncedMsg = syncRes.ok ? 'และส่งเข้า Google Sheet แล้ว' : 'เรียบร้อยแล้ว';
 
     if (startNext) {
       draft = createBlankDraft(draft);
-      activeStep = 'info';
-      showToast(`บันทึก HN ${recordToSave.hn} ${syncedMsg}`);
+      showToast(`บันทึก ${nnId} ${syncedMsg}`);
       render();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else {
       draft = createBlankDraft();
-      activeStep = 'info';
       currentView = 'history';
-      showToast(`บันทึก HN ${recordToSave.hn} ${syncedMsg}`);
+      showToast(`บันทึก ${nnId} ${syncedMsg}`);
       render();
     }
   };
@@ -1388,8 +1426,10 @@ function getFilteredAuditsForHistory() {
     if (historyFilter.room !== 'ALL' && a.room !== historyFilter.room) return false;
     if (historyFilter.module !== 'ALL' && !(a.selectedModules || []).includes(historyFilter.module)) return false;
     if (!q) return true;
+    const decHn = decryptedHnCache.get(a.id) || '';
     return (
-      (a.hn || '').toLowerCase().includes(q) ||
+      (a.nnId || a.id || '').toLowerCase().includes(q) ||
+      decHn.toLowerCase().includes(q) ||
       (a.unit || '').toLowerCase().includes(q) ||
       (a.room || '').toLowerCase().includes(q) ||
       (a.auditor || '').toLowerCase().includes(q) ||
@@ -1411,6 +1451,7 @@ function renderHistoryView() {
         ).filter(Boolean);
 
   const hasDemo = audits.some((a) => a.isDemo);
+  const adminUnlocked = isAdminUnlocked();
 
   return `
     <div class="space-y-5 pb-10">
@@ -1418,7 +1459,7 @@ function renderHistoryView() {
         <div class="flex flex-wrap items-center gap-2">
           <div class="relative flex-1 min-w-[200px]">
             <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3.5 top-2.5"></i>
-            <input id="hist-search" type="text" placeholder="ค้นหา HN, หน่วย, ห้องตรวจ, ผู้ประเมิน..." value="${esc(historyFilter.search)}" class="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
+            <input id="hist-search" type="text" placeholder="${adminUnlocked ? 'ค้นหา Nurse Note ID, HN, หน่วย, ห้องตรวจ...' : 'ค้นหา Nurse Note ID, หน่วย, ห้องตรวจ, ผู้ประเมิน...'}" value="${esc(historyFilter.search)}" class="w-full rounded-xl border border-slate-200 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/30" />
           </div>
           <select id="hist-unit" class="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white">
             <option value="ALL">ทุกหน่วย</option>
@@ -1439,6 +1480,17 @@ function renderHistoryView() {
         <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
           <span class="text-xs text-slate-400">แสดง ${filtered.length} รายการ</span>
           <div class="flex flex-wrap items-center gap-2">
+            ${
+              adminUnlocked
+                ? `<button id="btn-admin-lock" class="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-medium hover:bg-emerald-100 flex items-center gap-1.5">
+                    <i data-lucide="unlock" class="w-3.5 h-3.5"></i>
+                    Admin ปลดล็อก HN อยู่ (คลิกเพื่อล็อก)
+                  </button>`
+                : `<button id="btn-admin-unlock" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-xs font-medium hover:bg-slate-100 flex items-center gap-1.5">
+                    <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+                    ปลดล็อก HN (Admin)
+                  </button>`
+            }
             ${
               hasDemo
                 ? `<button id="btn-clear-demo" class="px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 text-xs font-medium hover:bg-amber-100">ล้างข้อมูลตัวอย่าง</button>`
@@ -1470,7 +1522,7 @@ function renderHistoryView() {
             <thead>
               <tr class="bg-slate-50/80 border-b border-slate-100 text-[11px] font-semibold text-slate-400 uppercase">
                 <th class="px-4 py-3">วันที่ (พ.ศ.)</th>
-                <th class="px-4 py-3">HN</th>
+                <th class="px-4 py-3">${adminUnlocked ? 'Nurse Note ID / HN' : 'Nurse Note ID'}</th>
                 <th class="px-4 py-3">หน่วย / ห้องตรวจ</th>
                 <th class="px-4 py-3">เกณฑ์</th>
                 <th class="px-4 py-3 text-center">Nurse Note</th>
@@ -1485,12 +1537,23 @@ function renderHistoryView() {
                   : filtered
                       .map((a) => {
                         const s = computeAuditSummary(a);
+                        const nnId = a.nnId || a.id;
+                        const decHn = adminUnlocked ? decryptedHnCache.get(a.id) : '';
                         return `
                           <tr class="hover:bg-slate-50/60 transition">
                             <td class="px-4 py-3 whitespace-nowrap text-xs text-slate-500">${formatThaiDate(a.auditDate)}</td>
-                            <td class="px-4 py-3 whitespace-nowrap font-semibold text-slate-900">
-                              ${esc(a.hn)}
-                              ${a.isDemo ? '<span class="ml-1 text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">ตัวอย่าง</span>' : ''}
+                            <td class="px-4 py-3 whitespace-nowrap">
+                              <div class="font-mono text-xs font-semibold text-slate-900">
+                                ${esc(nnId)}
+                                ${a.isDemo ? '<span class="ml-1 font-sans text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">ตัวอย่าง</span>' : ''}
+                              </div>
+                              ${
+                                adminUnlocked
+                                  ? `<div class="text-[11px] mt-0.5 ${decHn ? 'text-emerald-700 font-semibold' : 'text-slate-400'}">${decHn ? `HN: ${esc(decHn)}` : (a.hnEncrypted ? 'ถอดรหัสไม่ได้' : 'ไม่ได้ระบุ HN')}</div>`
+                                  : a.hnEncrypted
+                                    ? '<div class="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1"><i data-lucide="lock" class="w-2.5 h-2.5"></i> มี HN เข้ารหัส</div>'
+                                    : ''
+                              }
                             </td>
                             <td class="px-4 py-3">
                               <div class="text-xs font-semibold text-slate-800">${esc(a.unit || '-')}</div>
@@ -1556,6 +1619,15 @@ function bindHistoryEvents() {
     historyFilter.module = e.target.value;
     render();
   });
+  document.getElementById('btn-admin-unlock')?.addEventListener('click', () => {
+    openAdminUnlockModal();
+  });
+  document.getElementById('btn-admin-lock')?.addEventListener('click', () => {
+    lockAdmin();
+    decryptedHnCache.clear();
+    showToast('ล็อกข้อมูล HN เรียบร้อยแล้ว', 'info');
+    render();
+  });
   document.getElementById('btn-clear-demo')?.addEventListener('click', () => {
     if (confirm('ต้องการลบข้อมูลตัวอย่างทั้งหมดหรือไม่?')) {
       audits = clearDemoAudits();
@@ -1576,6 +1648,7 @@ function bindHistoryEvents() {
         }
       }
       saveAudits(audits);
+      await refreshDecryptedHnCache();
       showToast(added > 0 ? `ดึงข้อมูลใหม่จาก Google Sheet เพิ่ม ${added} รายการ` : 'ข้อมูลเป็นปัจจุบันแล้ว');
       render();
     } else {
@@ -1583,7 +1656,11 @@ function bindHistoryEvents() {
     }
   });
   document.getElementById('btn-hist-excel')?.addEventListener('click', () => {
-    exportAuditsToExcel(getFilteredAuditsForHistory());
+    exportAuditsToExcel(
+      getFilteredAuditsForHistory(),
+      'NurseNote_Audit',
+      isAdminUnlocked() ? decryptedHnCache : null
+    );
     showToast('ส่งออกไฟล์ Excel เรียบร้อยแล้ว');
   });
   document.getElementById('btn-hist-pdf')?.addEventListener('click', () => {
@@ -1602,12 +1679,12 @@ function bindHistoryEvents() {
       if (rec) {
         draft = JSON.parse(JSON.stringify(rec));
         draft.isNew = false;
+        draft.hnInput = isAdminUnlocked() ? decryptedHnCache.get(rec.id) || '' : '';
         const unitRooms = getRoomsForUnit(draft.unit);
         if (draft.room && !unitRooms.includes(draft.room)) {
           draft.customRoom = draft.room;
           draft.room = 'อื่นๆ';
         }
-        activeStep = 'info';
         currentView = 'audit';
         render();
       }
@@ -1616,12 +1693,75 @@ function bindHistoryEvents() {
   document.querySelectorAll('.btn-del-audit').forEach((btn) => {
     btn.addEventListener('click', () => {
       const rec = audits.find((a) => a.id === btn.dataset.delId);
-      if (rec && confirm(`ลบผลการประเมิน HN ${rec.hn} วันที่ ${formatThaiDate(rec.auditDate)}?`)) {
+      if (rec && confirm(`ลบผลการประเมิน ${rec.nnId || rec.id} วันที่ ${formatThaiDate(rec.auditDate)}?`)) {
         audits = deleteAudit(rec.id);
+        decryptedHnCache.delete(rec.id);
         showToast('ลบรายการแล้ว');
         render();
       }
     });
+  });
+}
+
+function openAdminUnlockModal() {
+  const modal = document.getElementById('modal-root');
+  modal.classList.remove('hidden');
+  modal.innerHTML = `
+    <div class="bg-white rounded-2xl max-w-sm w-full shadow-2xl overflow-hidden border border-slate-200">
+      <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="shield-check" class="w-4 h-4 text-brand-700"></i>
+          <h3 class="font-bold text-sm text-slate-900">ปลดล็อกดู HN (Admin)</h3>
+        </div>
+        <button id="btn-close-admin" class="p-1 rounded-lg text-slate-400 hover:bg-slate-100">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <form id="form-admin-unlock" class="p-5 space-y-4">
+        <p class="text-xs text-slate-500">กรอกรหัสผ่าน Admin เพื่อถอดรหัสดู HN ชั่วคราว (รหัสจะไม่ถูกบันทึกไว้ในเครื่อง เมื่อปิดหรือรีเฟรชจะล็อกอัตโนมัติ)</p>
+        <input id="inp-admin-pass" type="password" autocomplete="off" placeholder="รหัสผ่าน Admin" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+        <div class="flex justify-end gap-2">
+          <button type="button" id="btn-cancel-admin" class="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-medium text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+          <button type="submit" id="btn-submit-admin" class="px-4 py-2 rounded-xl bg-brand-700 text-white text-xs font-medium hover:bg-brand-800">ปลดล็อก</button>
+        </div>
+      </form>
+    </div>
+  `;
+  if (window.lucide) window.lucide.createIcons();
+  const close = () => modal.classList.add('hidden');
+  document.getElementById('btn-close-admin')?.addEventListener('click', close);
+  document.getElementById('btn-cancel-admin')?.addEventListener('click', close);
+  document.getElementById('inp-admin-pass')?.focus();
+
+  document.getElementById('form-admin-unlock')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pass = document.getElementById('inp-admin-pass')?.value || '';
+    const btn = document.getElementById('btn-submit-admin');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'กำลังตรวจสอบ...';
+    }
+    try {
+      const ok = await unlockAdmin(pass);
+      if (ok) {
+        await refreshDecryptedHnCache();
+        close();
+        showToast('ปลดล็อกสิทธิ์ Admin แล้ว — แสดง HN ที่เข้ารหัสไว้');
+        render();
+      } else {
+        showToast('รหัสผ่าน Admin ไม่ถูกต้อง', 'error');
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'ปลดล็อก';
+        }
+      }
+    } catch {
+      showToast('เกิดข้อผิดพลาดในการถอดรหัส', 'error');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'ปลดล็อก';
+      }
+    }
   });
 }
 
@@ -1742,6 +1882,7 @@ function exportDashboardPdf() {
 }
 
 function exportHistoryPdf(list) {
+  const adminUnlocked = isAdminUnlocked();
   const html = `
     <div style="font-family: 'IBM Plex Sans Thai', sans-serif; color: #0f172a;">
       <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom:2px solid #0f766e; padding-bottom:10px; margin-bottom:14px;">
@@ -1756,7 +1897,7 @@ function exportHistoryPdf(list) {
         <thead>
           <tr style="background:#f1f5f9; border-bottom:1.5px solid #cbd5e1;">
             <th style="text-align:left; padding:6px;">วันที่ (พ.ศ.)</th>
-            <th style="text-align:left; padding:6px;">HN</th>
+            <th style="text-align:left; padding:6px;">${adminUnlocked ? 'Nurse Note ID / HN' : 'Nurse Note ID'}</th>
             <th style="text-align:left; padding:6px;">หน่วย / ห้องตรวจ</th>
             <th style="text-align:left; padding:6px;">เกณฑ์</th>
             <th style="text-align:right; padding:6px;">Nurse Note</th>
@@ -1768,10 +1909,11 @@ function exportHistoryPdf(list) {
           ${list
             .map((a) => {
               const s = computeAuditSummary(a);
+              const decHn = adminUnlocked ? decryptedHnCache.get(a.id) : '';
               return `
                 <tr style="border-bottom:1px solid #e2e8f0;">
                   <td style="padding:6px; white-space:nowrap;">${formatThaiDate(a.auditDate)}</td>
-                  <td style="padding:6px; font-weight:700;">${esc(a.hn)}</td>
+                  <td style="padding:6px; font-weight:700;">${esc(a.nnId || a.id)}${decHn ? `<br/><span style="font-weight:400; color:#047857;">HN: ${esc(decHn)}</span>` : ''}</td>
                   <td style="padding:6px;">${esc(a.unit || '-')} / ${esc(a.room || '-')}</td>
                   <td style="padding:6px;">${(a.selectedModules || []).map((m) => MODULE_META[m].shortName).join(', ')}</td>
                   <td style="padding:6px; text-align:right;">${s.modules.NURSE_NOTE.pct ?? '-'}%</td>
@@ -1791,6 +1933,7 @@ function exportHistoryPdf(list) {
 function exportSingleAuditPdf(rec) {
   const s = computeAuditSummary(rec);
   const itemsMap = getAllItemsMap();
+  const decHn = isAdminUnlocked() ? decryptedHnCache.get(rec.id) : '';
   const issues = [];
   for (const [id, val] of Object.entries(rec.answers || {})) {
     const meta = itemsMap.get(id);
@@ -1809,7 +1952,7 @@ function exportSingleAuditPdf(rec) {
         <p style="font-size:12px; color:#475569; margin:4px 0 0;">โรงพยาบาลมหาราชนครเชียงใหม่</p>
       </div>
       <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px; font-size:12px; margin-bottom:16px;">
-        <div><span style="color:#64748b;">HN:</span> <strong>${esc(rec.hn)}</strong></div>
+        <div><span style="color:#64748b;">Nurse Note ID:</span> <strong>${esc(rec.nnId || rec.id)}</strong>${decHn ? `<br/><span style="color:#047857;">HN: ${esc(decHn)}</span>` : ''}</div>
         <div><span style="color:#64748b;">วันที่ประเมิน:</span> <strong>${formatThaiDate(rec.auditDate)}</strong></div>
         <div><span style="color:#64748b;">ผู้ประเมิน:</span> <strong>${esc(rec.auditor || '-')}</strong></div>
         <div><span style="color:#64748b;">หน่วย:</span> <strong>${esc(rec.unit || '-')}</strong></div>
@@ -1861,13 +2004,14 @@ function openDetailModal(rec) {
     }
   }
 
+  const decHn = isAdminUnlocked() ? decryptedHnCache.get(rec.id) : '';
   const modal = document.getElementById('modal-root');
   modal.classList.remove('hidden');
   modal.innerHTML = `
     <div class="bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden my-8 border border-slate-200">
       <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
         <div>
-          <h3 class="font-bold text-sm sm:text-base text-slate-900">HN ${esc(rec.hn)}</h3>
+          <h3 class="font-bold text-sm sm:text-base text-slate-900 font-mono">${esc(rec.nnId || rec.id)}${decHn ? ` <span class="font-sans text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md ml-1">HN: ${esc(decHn)}</span>` : ''}</h3>
           <p class="text-xs text-slate-400">${formatThaiDate(rec.auditDate)} • ${esc(rec.unit || '-')} / ${esc(rec.room || '-')}</p>
         </div>
         <button id="btn-close-modal" class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100">
