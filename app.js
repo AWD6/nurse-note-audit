@@ -290,85 +290,109 @@ function render() {
 // ============================================================
 // VIEW 1: MINIMAL AUDIT FORM
 // ============================================================
+function isUnitRoomReady() {
+  if (!draft.unit || !draft.room) return false;
+  if (draft.room === 'อื่นๆ') return Boolean(draft.customRoom?.trim());
+  return true;
+}
+
 function renderAuditView() {
   const summary = computeAuditSummary(draft);
   const effectiveRoom = getEffectiveDraftRoom();
+  const ready = isUnitRoomReady();
 
   return `
     <div class="space-y-6 pb-16">
-      <!-- Ultra-Slim Sticky Score Bar -->
-      <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-xs px-4 py-3 sticky top-[72px] z-20">
-        <div class="flex flex-wrap items-center justify-between gap-2.5">
-          <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-            <span class="font-bold text-slate-900 font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md">${esc(draft.nnId)}</span>
-            <span class="text-slate-300">•</span>
-            <span class="text-slate-500">${formatThaiDate(draft.auditDate)}</span>
-            ${
-              draft.unit || effectiveRoom
-                ? `<span class="text-slate-300">•</span><span class="text-brand-700 font-medium">${esc(draft.unit || '-')} / ${esc(effectiveRoom || '-')}</span>`
-                : ''
-            }
-          </div>
+      ${
+        ready
+          ? `
+        <!-- Ultra-Slim Sticky Score Bar -->
+        <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-xs px-4 py-3 sticky top-[72px] z-20">
+          <div class="flex flex-wrap items-center justify-between gap-2.5">
+            <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+              <span class="font-bold text-slate-900 font-mono text-xs bg-slate-100 px-2 py-0.5 rounded-md">${esc(draft.nnId)}</span>
+              <span class="text-slate-300">•</span>
+              <span class="text-slate-500">${formatThaiDate(draft.auditDate)}</span>
+              <span class="text-slate-300">•</span>
+              <span class="text-brand-700 font-medium">${esc(draft.unit)} / ${esc(effectiveRoom)}</span>
+            </div>
 
-          <div class="flex flex-wrap items-center gap-1.5">
-            ${
-              summary.modules.NHSO
-                ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.NHSO.pct)}">สปสช. ${summary.modules.NHSO.pct ?? '-'}%</span>`
-                : ''
-            }
-            ${
-              summary.modules.HAIT
-                ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.HAIT.pct)}">HA IT ${summary.modules.HAIT.pct ?? '-'}%</span>`
-                : ''
-            }
-            ${
-              summary.modules.MINOR_OR
-                ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.MINOR_OR.pct)}">OR เล็ก ${summary.modules.MINOR_OR.pct ?? '-'}%</span>`
-                : ''
-            }
-            <span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.NURSE_NOTE.pct)}">Nurse Note ${summary.modules.NURSE_NOTE.pct ?? '-'}%</span>
-            <span class="text-xs sm:text-sm px-3 py-1 rounded-lg font-bold ${
-              summary.overallPct === null
-                ? 'bg-slate-100 text-slate-500'
-                : summary.passed
-                  ? 'bg-brand-700 text-white'
-                  : 'bg-rose-600 text-white'
-            }">รวม ${summary.overallPct ?? '-'}%</span>
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${
+                summary.modules.NHSO
+                  ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.NHSO.pct)}">สปสช. ${summary.modules.NHSO.pct ?? '-'}%</span>`
+                  : ''
+              }
+              ${
+                summary.modules.HAIT
+                  ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.HAIT.pct)}">HA IT ${summary.modules.HAIT.pct ?? '-'}%</span>`
+                  : ''
+              }
+              ${
+                summary.modules.MINOR_OR
+                  ? `<span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.MINOR_OR.pct)}">OR เล็ก ${summary.modules.MINOR_OR.pct ?? '-'}%</span>`
+                  : ''
+              }
+              <span class="text-xs px-2.5 py-1 rounded-lg font-medium ${scoreBadgeClass(summary.modules.NURSE_NOTE.pct)}">Nurse Note ${summary.modules.NURSE_NOTE.pct ?? '-'}%</span>
+              <span class="text-xs sm:text-sm px-3 py-1 rounded-lg font-bold ${
+                summary.overallPct === null
+                  ? 'bg-slate-100 text-slate-500'
+                  : summary.passed
+                    ? 'bg-brand-700 text-white'
+                    : 'bg-rose-600 text-white'
+              }">รวม ${summary.overallPct ?? '-'}%</span>
+            </div>
           </div>
         </div>
-      </div>
+      `
+          : ''
+      }
 
       <!-- Single Scroll Flow -->
-      ${renderStepInfo()}
-      ${draft.selectedModules.includes('NHSO') ? renderBinaryModuleStep('OPD สปสช.', NHSO_SECTIONS, 'NHSO') : ''}
-      ${draft.selectedModules.includes('HAIT') ? renderHaitStep() : ''}
-      ${draft.selectedModules.includes('MINOR_OR') ? renderBinaryModuleStep('ห้องผ่าตัดเล็ก (สปสช.)', MINOR_OR_SECTIONS, 'MINOR_OR') : ''}
-      ${renderBinaryModuleStep('บันทึกทางการพยาบาล (Nurse Note)', NURSE_NOTE_SECTIONS, 'NURSE_NOTE')}
-      ${renderRiskStep()}
-      ${renderSummaryStep(summary)}
+      ${renderStepInfo(ready)}
+      ${
+        ready
+          ? `
+        ${draft.selectedModules.includes('NHSO') ? renderBinaryModuleStep('OPD สปสช.', NHSO_SECTIONS, 'NHSO') : ''}
+        ${draft.selectedModules.includes('HAIT') ? renderHaitStep() : ''}
+        ${draft.selectedModules.includes('MINOR_OR') ? renderBinaryModuleStep('ห้องผ่าตัดเล็ก (สปสช.)', MINOR_OR_SECTIONS, 'MINOR_OR') : ''}
+        ${renderBinaryModuleStep('บันทึกทางการพยาบาล (Nurse Note)', NURSE_NOTE_SECTIONS, 'NURSE_NOTE')}
+        ${renderRiskStep()}
+        ${renderSummaryStep(summary)}
 
-      <!-- Bottom Save Actions -->
-      <div class="flex flex-wrap items-center justify-end gap-2.5 pt-2">
-        <button
-          id="btn-save-audit"
-          class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 transition"
-        >
-          <i data-lucide="save" class="w-4 h-4"></i>
-          บันทึกผลประเมิน
-        </button>
-        <button
-          id="btn-save-and-new"
-          class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
-        >
-          <i data-lucide="plus" class="w-4 h-4"></i>
-          บันทึก &amp; ประเมินรายถัดไป
-        </button>
-      </div>
+        <!-- Bottom Save Actions -->
+        <div class="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+          <button
+            id="btn-save-audit"
+            class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 transition"
+          >
+            <i data-lucide="save" class="w-4 h-4"></i>
+            บันทึกผลประเมิน
+          </button>
+          <button
+            id="btn-save-and-new"
+            class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
+          >
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            บันทึก &amp; ประเมินรายถัดไป
+          </button>
+        </div>
+      `
+          : `
+        <div class="bg-white rounded-2xl border border-dashed border-slate-200 p-10 text-center space-y-2">
+          <div class="w-10 h-10 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center mx-auto">
+            <i data-lucide="building-2" class="w-5 h-5"></i>
+          </div>
+          <p class="text-sm font-semibold text-slate-700">กรุณาเลือกหน่วยและห้องตรวจก่อนเริ่มประเมิน</p>
+          <p class="text-xs text-slate-400">เมื่อเลือกหน่วยและห้องตรวจครบถ้วน เกณฑ์การประเมินจะแสดงขึ้นโดยอัตโนมัติ</p>
+        </div>
+      `
+      }
     </div>
   `;
 }
 
-function renderStepInfo() {
+function renderStepInfo(ready) {
   const selectableModules = ['NHSO', 'HAIT', 'MINOR_OR'];
   const unitRooms = getRoomsForUnit(draft.unit);
   const showCustomRoom = draft.unit === 'อื่นๆ' || draft.room === 'อื่นๆ';
@@ -442,42 +466,48 @@ function renderStepInfo() {
         }
       </div>
 
-      <!-- Row 3: Modules -->
-      <div class="pt-2 border-t border-slate-100">
-        <label class="block text-xs font-medium text-slate-500 mb-2.5">
-          เกณฑ์ที่ประเมิน <span class="text-rose-500">*</span>
-          <span class="text-slate-400 font-normal ml-1">(เลือกได้มากกว่า 1 ชุด • รวม Nurse Note อัตโนมัติ)</span>
-        </label>
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          ${selectableModules
-            .map((code) => {
-              const m = MODULE_META[code];
-              const checked = draft.selectedModules.includes(code);
-              return `
-                <button
-                  type="button"
-                  data-toggle-module="${code}"
-                  class="module-toggle text-left p-3.5 rounded-xl border transition flex items-start gap-3 ${
-                    checked
-                      ? 'border-brand-600 bg-brand-50/50 ring-1 ring-brand-600/20'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
-                  }"
-                >
-                  <div class="w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${
-                    checked ? 'bg-brand-700 border-brand-700 text-white' : 'border-slate-300 bg-white'
-                  }">
-                    ${checked ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
-                  </div>
-                  <div>
-                    <div class="font-semibold text-sm text-slate-900">${m.shortName}</div>
-                    <div class="text-xs text-slate-400 mt-0.5">${m.description}</div>
-                  </div>
-                </button>
-              `;
-            })
-            .join('')}
+      ${
+        ready
+          ? `
+        <!-- Row 3: Modules (shown only after Unit & Room selected) -->
+        <div class="pt-2 border-t border-slate-100">
+          <label class="block text-xs font-medium text-slate-500 mb-2.5">
+            เกณฑ์ที่ประเมิน <span class="text-rose-500">*</span>
+            <span class="text-slate-400 font-normal ml-1">(เลือกได้มากกว่า 1 ชุด • รวม Nurse Note อัตโนมัติ)</span>
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            ${selectableModules
+              .map((code) => {
+                const m = MODULE_META[code];
+                const checked = draft.selectedModules.includes(code);
+                return `
+                  <button
+                    type="button"
+                    data-toggle-module="${code}"
+                    class="module-toggle text-left p-3.5 rounded-xl border transition flex items-start gap-3 ${
+                      checked
+                        ? 'border-brand-600 bg-brand-50/50 ring-1 ring-brand-600/20'
+                        : 'border-slate-200 bg-white hover:border-slate-300'
+                    }"
+                  >
+                    <div class="w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${
+                      checked ? 'bg-brand-700 border-brand-700 text-white' : 'border-slate-300 bg-white'
+                    }">
+                      ${checked ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
+                    </div>
+                    <div>
+                      <div class="font-semibold text-sm text-slate-900">${m.shortName}</div>
+                      <div class="text-xs text-slate-400 mt-0.5">${m.description}</div>
+                    </div>
+                  </button>
+                `;
+              })
+              .join('')}
+          </div>
         </div>
-      </div>
+      `
+          : ''
+      }
     </div>
   `;
 }
@@ -767,7 +797,16 @@ function bindAuditEvents() {
     render();
   });
   document.getElementById('inp-custom-room')?.addEventListener('input', (e) => {
+    const prevReady = isUnitRoomReady();
     draft.customRoom = e.target.value;
+    if (prevReady !== isUnitRoomReady()) {
+      render();
+      const el = document.getElementById('inp-custom-room');
+      if (el) {
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      }
+    }
   });
 
   document.querySelectorAll('.module-toggle').forEach((btn) => {
