@@ -7,6 +7,38 @@ export const GOOGLE_SHEET_CONFIG = {
 };
 
 const STORAGE_KEY = 'maharat_nurse_note_audits_v5';
+const SETTINGS_KEY = 'maharat_nurse_note_settings_v5';
+
+export function getSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        defaultAuditor: parsed.defaultAuditor || '',
+        defaultUnit: parsed.defaultUnit || '',
+        defaultRoom: parsed.defaultRoom || '',
+        sheetUrl: parsed.sheetUrl || GOOGLE_SHEET_CONFIG.sheetUrl,
+        webAppUrl: parsed.webAppUrl || GOOGLE_SHEET_CONFIG.webAppUrl,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return {
+    defaultAuditor: '',
+    defaultUnit: '',
+    defaultRoom: '',
+    sheetUrl: GOOGLE_SHEET_CONFIG.sheetUrl,
+    webAppUrl: GOOGLE_SHEET_CONFIG.webAppUrl,
+  };
+}
+
+export function saveSettings(newSettings) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(newSettings));
+  if (newSettings.sheetUrl) GOOGLE_SHEET_CONFIG.sheetUrl = newSettings.sheetUrl;
+  if (newSettings.webAppUrl) GOOGLE_SHEET_CONFIG.webAppUrl = newSettings.webAppUrl;
+}
 
 // Clean up any legacy pre-production demo keys once
 function clearLegacyStorage() {

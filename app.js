@@ -21,6 +21,8 @@ import {
 } from './scoring.js';
 import {
   GOOGLE_SHEET_CONFIG,
+  getSettings,
+  saveSettings,
   loadAudits,
   saveAudits,
   upsertAudit,
@@ -51,8 +53,11 @@ const THAI_MONTHS_SHORT = [
 // ============================================================
 // App State
 // ============================================================
-let currentView = 'audit'; // 'audit' | 'dashboard' | 'history'
+let currentView = 'audit'; // 'audit' | 'dashboard' | 'history' | 'settings'
 let audits = loadAudits();
+let settings = getSettings();
+if (settings.sheetUrl) GOOGLE_SHEET_CONFIG.sheetUrl = settings.sheetUrl;
+if (settings.webAppUrl) GOOGLE_SHEET_CONFIG.webAppUrl = settings.webAppUrl;
 let chartInstances = {};
 let decryptedHnCache = new Map(); // RAM-only decrypted HN cache when Admin unlocked
 
@@ -69,6 +74,8 @@ async function refreshDecryptedHnCache() {
 
 function createBlankDraft(keepContext = null) {
   const dateIso = keepContext?.auditDate || getTodayIso();
+  const unit = keepContext?.unit ?? settings.defaultUnit ?? '';
+  const room = keepContext?.room ?? settings.defaultRoom ?? '';
   return {
     id: 'audit-' + Date.now(),
     nnId: generateNurseNoteId(dateIso),
@@ -79,11 +86,16 @@ function createBlankDraft(keepContext = null) {
     patientType: 'old',
     gender: '',
     age: '',
-    unit: keepContext?.unit || '',
-    room: keepContext?.room || '',
+    unit,
+    room,
     customRoom: keepContext?.customRoom || '',
-    auditor: keepContext?.auditor || '',
-    selectedModules: keepContext?.selectedModules ? [...keepContext.selectedModules] : ['NHSO'],
+    auditor: keepContext?.auditor ?? settings.defaultAuditor ?? '',
+    selectedModules:
+      keepContext?.selectedModules
+        ? [...keepContext.selectedModules]
+        : unit === 'หน่วยผ่าตัดเล็ก'
+          ? ['MINOR_OR']
+          : ['NHSO'],
     answers: {},
     hait4Note: '',
     feedback: '',
@@ -353,6 +365,9 @@ function render() {
   } else if (currentView === 'history') {
     root.innerHTML = renderHistoryView();
     bindHistoryEvents();
+  } else if (currentView === 'settings') {
+    root.innerHTML = renderSettingsView();
+    bindSettingsEvents();
   }
 
   if (window.lucide) window.lucide.createIcons();
@@ -2367,6 +2382,179 @@ function openDetailModal(rec) {
   document.getElementById('btn-modal-pdf')?.addEventListener('click', () => exportSingleAuditPdf(rec));
   modal.addEventListener('click', (e) => {
     if (e.target === modal) close();
+  });
+}
+
+// ============================================================
+// VIEW 4: SETTINGS & GOOGLE SHEET ACCESS
+// ============================================================
+function renderSettingsView() {
+  const defRooms = getRoomsForUnit(settings.defaultUnit);
+  const sheetUrl = settings.sheetUrl || GOOGLE_SHEET_CONFIG.sheetUrl;
+
+  return `
+    <div class="max-w-3xl space-y-6 pb-12">
+      <!-- Google Sheet Direct Access Card -->
+      <div class="bg-white rounded-2xl border border-emerald-200/80 shadow-xs p-5 sm:p-6 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+              <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h2 class="text-lg font-bold text-slate-900">ฐานข้อมูล Google Sheet</h2>
+              <p class="text-sm text-emerald-700 font-medium flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                เชื่อมต่อกับ Google Sheet แล้ว (บันทึกแยกตามหน่วยและห้องตรวจอัตโนมัติ)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3 pt-1">
+          <a
+            href="${esc(sheetUrl)}"
+            target="_blank"
+            rel="noopener"
+            class="px-5 py-3 rounded-xl bg-emerald-600 text-white text-sm sm:text-base font-semibold hover:bg-emerald-700 shadow-xs flex items-center gap-2 transition"
+          >
+            <i data-lucide="external-link" class="w-4 h-4"></i>
+            เปิด Google Sheet
+          </a>
+          <button
+            type="button"
+            id="btn-set-sync-sheet"
+            class="px-4 py-3 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-sm sm:text-base font-semibold hover:bg-emerald-100 flex items-center gap-2 transition"
+          >
+            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            ดึงข้อมูลล่าสุดจาก Sheet
+          </button>
+        </div>
+      </div>
+
+      <!-- Default Settings Card -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-5">
+        <div>
+          <h2 class="text-lg font-bold text-slate-900">ตั้งค่าค่าเริ่มต้นประจำเครื่อง</h2>
+          <p class="text-sm text-slate-500 mt-0.5">ตั้งค่าหน่วย ห้องตรวจ หรือชื่อผู้ประเมินเริ่มต้น เพื่อไม่ต้องเลือกซ้ำทุกครั้ง</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">หน่วยประจำ</label>
+            <select id="set-unit" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/40">
+              <option value="">ไม่กำหนด</option>
+              ${OPD_UNITS.map(
+                (u) => `<option value="${esc(u.unit)}" ${settings.defaultUnit === u.unit ? 'selected' : ''}>${esc(u.unit)}</option>`
+              ).join('')}
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">ห้องตรวจประจำ</label>
+            <select id="set-room" ${!settings.defaultUnit ? 'disabled' : ''} class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base bg-white disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40">
+              <option value="">ไม่กำหนด</option>
+              ${defRooms.map((r) => `<option value="${esc(r)}" ${settings.defaultRoom === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-semibold text-slate-700 mb-1.5">ชื่อผู้ประเมินเริ่มต้น</label>
+          <input id="set-auditor" type="text" value="${esc(settings.defaultAuditor || '')}" placeholder="ระบุชื่อ-นามสกุลผู้ประเมิน" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
+        </div>
+
+        <button id="btn-save-settings" class="px-5 py-3 rounded-xl bg-brand-700 text-white text-sm sm:text-base font-semibold hover:bg-brand-800 shadow-xs transition">
+          บันทึกการตั้งค่า
+        </button>
+      </div>
+
+      <!-- Backup / Restore Card -->
+      <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-3">
+        <h3 class="text-base font-bold text-slate-900">สำรองข้อมูล / กู้คืนข้อมูล (JSON)</h3>
+        <div class="flex flex-wrap gap-2.5">
+          <button id="btn-backup-json" class="px-4 py-2.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            ดาวน์โหลดไฟล์สำรอง (.json)
+          </button>
+          <label class="px-4 py-2.5 rounded-xl border border-brand-200 bg-brand-50 text-sm font-semibold text-brand-800 hover:bg-brand-100 cursor-pointer">
+            นำเข้าไฟล์สำรอง (.json)
+            <input id="inp-restore-json" type="file" accept=".json" class="hidden" />
+          </label>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindSettingsEvents() {
+  document.getElementById('set-unit')?.addEventListener('change', (e) => {
+    settings.defaultUnit = e.target.value;
+    settings.defaultRoom = '';
+    render();
+  });
+
+  document.getElementById('btn-save-settings')?.addEventListener('click', () => {
+    settings = {
+      ...settings,
+      defaultUnit: document.getElementById('set-unit')?.value || '',
+      defaultRoom: document.getElementById('set-room')?.value || '',
+      defaultAuditor: document.getElementById('set-auditor')?.value.trim() || '',
+    };
+    saveSettings(settings);
+    if (!draft.unit && settings.defaultUnit) draft.unit = settings.defaultUnit;
+    if (!draft.room && settings.defaultRoom) draft.room = settings.defaultRoom;
+    if (!draft.auditor && settings.defaultAuditor) draft.auditor = settings.defaultAuditor;
+    showToast('บันทึกการตั้งค่าเรียบร้อยแล้ว');
+  });
+
+  document.getElementById('btn-set-sync-sheet')?.addEventListener('click', async () => {
+    showToast('กำลังดึงข้อมูลจาก Google Sheet...', 'info');
+    const res = await pullAuditsFromGoogleSheet();
+    if (res.ok) {
+      const existingIds = new Set(audits.map((a) => a.id));
+      let added = 0;
+      for (const r of res.records) {
+        if (r && r.id && !existingIds.has(r.id)) {
+          audits.unshift(r);
+          added++;
+        }
+      }
+      saveAudits(audits);
+      await refreshDecryptedHnCache();
+      showToast(added > 0 ? `ดึงข้อมูลใหม่จาก Google Sheet เพิ่ม ${added} รายการ` : 'ข้อมูลเป็นปัจจุบันแล้ว');
+    } else {
+      showToast('ไม่สามารถเชื่อมต่อ Google Sheet ได้', 'error');
+    }
+  });
+
+  document.getElementById('btn-backup-json')?.addEventListener('click', () => {
+    const blob = new Blob([JSON.stringify(audits, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nurse_note_backup_${formatThaiDate(getTodayIso()).replace(/\//g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('inp-restore-json')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (!Array.isArray(parsed)) throw new Error('Invalid');
+        audits = parsed;
+        saveAudits(audits);
+        await refreshDecryptedHnCache();
+        showToast(`นำเข้าข้อมูลสำเร็จ ${audits.length} รายการ`);
+        render();
+      } catch {
+        showToast('ไฟล์สำรองไม่ถูกต้อง', 'error');
+      }
+    };
+    reader.readAsText(file);
   });
 }
 
