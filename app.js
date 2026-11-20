@@ -107,6 +107,76 @@ function esc(str) {
     .replace(/'/g, '&#39;');
 }
 
+// Highlight key clinical & audit keywords for fast scanning on mobile / tablet / desktop
+const HIGHLIGHT_KEYWORDS = [
+  'Chief complaint',
+  'Present illness',
+  'Underlying disease',
+  'Past illness',
+  'Clinical term',
+  'Pulse rate',
+  'Respiration rate',
+  'Temperature',
+  'Blood Pressure',
+  'Vaccination',
+  'Growth development',
+  'Pathology',
+  'DMETHOD',
+  'Discharge plan',
+  'Pressure Injury',
+  'Falling',
+  'Pain',
+  'ชื่อ-นามสกุล',
+  'เลขที่โรงพยาบาล \\(HN\\)',
+  'HN',
+  'แพ้ยา',
+  'หมู่เลือด',
+  'เวลาแรกรับ',
+  'ข้อวินิจฉัยทางการพยาบาล',
+  'กิจกรรมการพยาบาล',
+  'ประเมินซ้ำ',
+  'คำแนะนำก่อนกลับบ้าน',
+  'นัดตรวจครั้งต่อไป',
+  'ส่งต่อสถานบริการอื่น',
+  'ลายมือชื่อ',
+  'ลายพิมพ์นิ้วมือ',
+  'พยาน',
+  'ภาวะแทรกซ้อน',
+  'วัน/เดือน/ปี',
+  'น้ำหนัก',
+  'ส่วนสูง',
+  'ประจำเดือน',
+  'สูบบุหรี่',
+  'ดื่มสุรา',
+  'สารเสพติด',
+  'ผู้ป่วยใหม่',
+  'โรคเรื้อรัง',
+  'ยาชา',
+  'ยาระงับความรู้สึก',
+  'การผ่าตัด',
+  'หัตถการ',
+  'ประเมินผล',
+  'ความเจ็บปวด',
+  'ความเสี่ยง',
+];
+const KEYWORD_REGEX = new RegExp(`(${HIGHLIGHT_KEYWORDS.join('|')})`, 'g');
+
+function highlightKeywords(text) {
+  const safe = esc(text);
+  return safe.replace(KEYWORD_REGEX, '<mark class="kw">$1</mark>');
+}
+
+function formatHaitOption(label) {
+  const safe = esc(label);
+  const colonIdx = safe.indexOf(':');
+  if (colonIdx > 0 && colonIdx < 20) {
+    const prefix = safe.slice(0, colonIdx).trim();
+    const rest = safe.slice(colonIdx + 1).trim();
+    return `<span class="inline-block font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md mr-1.5">${prefix}</span><span>${rest}</span>`;
+  }
+  return safe;
+}
+
 function getRoomsForUnit(unitName) {
   const found = OPD_UNITS.find((u) => u.unit === unitName);
   return found ? found.rooms : [];
@@ -168,23 +238,23 @@ function renderThaiDatePicker(prefix, isoValue, allowEmpty = false) {
 
   return `
     <div class="flex items-center gap-1.5" data-thai-date="${prefix}">
-      <select id="${prefix}-day" class="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
+      <select id="${prefix}-day" class="rounded-xl border border-slate-300/90 bg-white px-2.5 py-2.5 text-base text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
         ${allowEmpty ? `<option value="" ${!hasVal ? 'selected' : ''}>วัน</option>` : ''}
         ${days.map((d) => `<option value="${d}" ${parts && parts.day === d ? 'selected' : ''}>${String(d).padStart(2, '0')}</option>`).join('')}
       </select>
-      <span class="text-slate-300 text-xs">/</span>
-      <select id="${prefix}-month" class="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
+      <span class="text-slate-400 text-sm">/</span>
+      <select id="${prefix}-month" class="rounded-xl border border-slate-300/90 bg-white px-2.5 py-2.5 text-base text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
         ${allowEmpty ? `<option value="" ${!hasVal ? 'selected' : ''}>เดือน</option>` : ''}
         ${THAI_MONTHS_SHORT.map((m, idx) => `<option value="${idx + 1}" ${parts && parts.month === idx + 1 ? 'selected' : ''}>${m}</option>`).join('')}
       </select>
-      <span class="text-slate-300 text-xs">/</span>
-      <select id="${prefix}-year" class="rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
+      <span class="text-slate-400 text-sm">/</span>
+      <select id="${prefix}-year" class="rounded-xl border border-slate-300/90 bg-white px-2.5 py-2.5 text-base text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
         ${allowEmpty ? `<option value="" ${!hasVal ? 'selected' : ''}>พ.ศ.</option>` : ''}
         ${years.map((y) => `<option value="${y}" ${parts && parts.yearBE === y ? 'selected' : ''}>${y}</option>`).join('')}
       </select>
       ${
         !allowEmpty
-          ? `<button type="button" id="${prefix}-today" class="px-2.5 py-2 rounded-xl text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">วันนี้</button>`
+          ? `<button type="button" id="${prefix}-today" class="px-3 py-2.5 rounded-xl text-sm font-semibold text-brand-700 bg-brand-50 hover:bg-brand-100 transition whitespace-nowrap">วันนี้</button>`
           : ''
       }
     </div>
@@ -266,7 +336,7 @@ function render() {
 
   document.querySelectorAll('.nav-btn').forEach((btn) => {
     const isActive = btn.dataset.view === currentView;
-    btn.className = `nav-btn px-3.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition whitespace-nowrap ${
+    btn.className = `nav-btn px-3.5 py-2 rounded-lg text-sm sm:text-base font-semibold flex items-center gap-1.5 transition whitespace-nowrap ${
       isActive ? 'bg-white text-brand-800 shadow-xs' : 'text-slate-500 hover:text-slate-800'
     }`;
   });
@@ -361,19 +431,19 @@ function renderAuditView() {
         ${renderSummaryStep(summary)}
 
         <!-- Bottom Save Actions -->
-        <div class="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 pt-2">
           <button
             id="btn-save-audit"
-            class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 transition"
+            class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-emerald-600 text-white text-base font-semibold hover:bg-emerald-700 shadow-xs flex items-center justify-center gap-2 transition"
           >
-            <i data-lucide="save" class="w-4 h-4"></i>
+            <i data-lucide="save" class="w-5 h-5"></i>
             บันทึกผลประเมิน
           </button>
           <button
             id="btn-save-and-new"
-            class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
+            class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-brand-700 text-white text-base font-semibold hover:bg-brand-800 shadow-xs flex items-center justify-center gap-2 transition"
           >
-            <i data-lucide="plus" class="w-4 h-4"></i>
+            <i data-lucide="plus" class="w-5 h-5"></i>
             บันทึก &amp; ประเมินรายถัดไป
           </button>
         </div>
@@ -401,44 +471,44 @@ function renderStepInfo(ready) {
     <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 sm:p-7 space-y-6">
       <div class="flex items-center justify-between gap-2">
         <div>
-          <h2 class="text-base sm:text-lg font-bold text-slate-900">ข้อมูลการประเมิน</h2>
-          <p class="text-xs text-slate-400 mt-0.5">เลือกหน่วย ห้องตรวจ และชุดเกณฑ์ที่ต้องการประเมิน</p>
+          <h2 class="text-lg sm:text-xl font-bold text-slate-900">ข้อมูลการประเมิน</h2>
+          <p class="text-sm text-slate-500 mt-0.5">เลือก <span class="font-semibold text-brand-700">หน่วย</span> และ <span class="font-semibold text-brand-700">ห้องตรวจ</span> เพื่อแสดงเกณฑ์การประเมิน</p>
         </div>
-        <button id="btn-reset-draft" class="text-xs text-slate-400 hover:text-rose-600 flex items-center gap-1 px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition">
-          <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        <button id="btn-reset-draft" class="text-sm text-slate-500 hover:text-rose-600 flex items-center gap-1.5 px-3 py-2 rounded-xl hover:bg-rose-50 transition font-medium">
+          <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
           เริ่มใหม่
         </button>
       </div>
 
       <!-- Row 1: Date (พ.ศ.) & HN & Auditor -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">วันที่ทำการประเมิน (วัน/เดือน/พ.ศ.) <span class="text-rose-500">*</span></label>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">วันที่ทำการประเมิน <span class="text-slate-400 font-normal">(วัน/เดือน/พ.ศ.)</span> <span class="text-rose-500">*</span></label>
           ${renderThaiDatePicker('audit-date', draft.auditDate, false)}
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">
-            HN <span class="text-slate-400 font-normal">(ไม่บังคับ • เข้ารหัส PDPA)</span>
+          <label class="block text-sm font-semibold text-slate-700 mb-2">
+            HN <span class="text-slate-400 font-normal text-xs">(ไม่บังคับ • เข้ารหัส PDPA)</span>
           </label>
-          <input id="inp-hn" type="text" placeholder="ไม่บังคับ — ส่งขึ้น Sheet เป็น ${esc(draft.nnId)}" value="${esc(draft.hnInput || '')}" class="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
-          <p class="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-            <i data-lucide="lock" class="w-3 h-3 text-emerald-600"></i>
-            <span>Nurse Note ID: <strong class="font-mono text-slate-600">${esc(draft.nnId)}</strong></span>
+          <input id="inp-hn" type="text" placeholder="ไม่บังคับ — ส่งขึ้น Sheet เป็น ${esc(draft.nnId)}" value="${esc(draft.hnInput || '')}" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base font-medium focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
+          <p class="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
+            <i data-lucide="lock" class="w-3.5 h-3.5 text-emerald-600"></i>
+            <span>Nurse Note ID: <strong class="font-mono text-slate-700">${esc(draft.nnId)}</strong></span>
           </p>
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">ผู้ประเมิน</label>
-          <input id="inp-auditor" type="text" placeholder="ชื่อ-นามสกุลผู้ประเมิน" value="${esc(draft.auditor)}" class="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
+          <label class="block text-sm font-semibold text-slate-700 mb-2">ผู้ประเมิน</label>
+          <input id="inp-auditor" type="text" placeholder="ชื่อ-นามสกุลผู้ประเมิน" value="${esc(draft.auditor)}" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
         </div>
       </div>
 
-      <!-- Row 2: Unit & Room (No room count, no "จุดบริการ") -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 ${showCustomRoom ? 'lg:grid-cols-3' : ''} gap-4 pt-2 border-t border-slate-100">
+      <!-- Row 2: Unit & Room -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 ${showCustomRoom ? 'lg:grid-cols-3' : ''} gap-5 pt-3 border-t border-slate-100">
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">หน่วย <span class="text-rose-500">*</span></label>
-          <select id="inp-unit" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">หน่วย <span class="text-rose-500">*</span></label>
+          <select id="inp-unit" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
             <option value="">เลือกหน่วย</option>
             ${OPD_UNITS.map(
               (u) => `<option value="${esc(u.unit)}" ${draft.unit === u.unit ? 'selected' : ''}>${esc(u.unit)}</option>`
@@ -447,8 +517,8 @@ function renderStepInfo(ready) {
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">ห้องตรวจ <span class="text-rose-500">*</span></label>
-          <select id="inp-room" ${!draft.unit ? 'disabled' : ''} class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
+          <label class="block text-sm font-semibold text-slate-700 mb-2">ห้องตรวจ <span class="text-rose-500">*</span></label>
+          <select id="inp-room" ${!draft.unit ? 'disabled' : ''} class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base bg-white disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500">
             <option value="">${draft.unit ? 'เลือกห้องตรวจ' : 'เลือกหน่วยก่อน'}</option>
             ${unitRooms.map((r) => `<option value="${esc(r)}" ${draft.room === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
           </select>
@@ -458,8 +528,8 @@ function renderStepInfo(ready) {
           showCustomRoom
             ? `
           <div>
-            <label class="block text-xs font-medium text-slate-500 mb-1.5">ระบุชื่อห้องตรวจ <span class="text-rose-500">*</span></label>
-            <input id="inp-custom-room" type="text" placeholder="ระบุชื่อห้องตรวจ..." value="${esc(draft.customRoom || '')}" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
+            <label class="block text-sm font-semibold text-slate-700 mb-2">ระบุชื่อห้องตรวจ <span class="text-rose-500">*</span></label>
+            <input id="inp-custom-room" type="text" placeholder="ระบุชื่อห้องตรวจ..." value="${esc(draft.customRoom || '')}" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500" />
           </div>
         `
             : ''
@@ -470,12 +540,12 @@ function renderStepInfo(ready) {
         ready
           ? `
         <!-- Row 3: Modules (shown only after Unit & Room selected) -->
-        <div class="pt-2 border-t border-slate-100">
-          <label class="block text-xs font-medium text-slate-500 mb-2.5">
+        <div class="pt-3 border-t border-slate-100">
+          <label class="block text-sm font-semibold text-slate-700 mb-3">
             เกณฑ์ที่ประเมิน <span class="text-rose-500">*</span>
-            <span class="text-slate-400 font-normal ml-1">(เลือกได้มากกว่า 1 ชุด • รวม Nurse Note อัตโนมัติ)</span>
+            <span class="text-slate-500 font-normal text-xs sm:text-sm ml-1">(เลือกได้มากกว่า 1 ชุด • รวม Nurse Note อัตโนมัติ)</span>
           </label>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
             ${selectableModules
               .map((code) => {
                 const m = MODULE_META[code];
@@ -484,20 +554,20 @@ function renderStepInfo(ready) {
                   <button
                     type="button"
                     data-toggle-module="${code}"
-                    class="module-toggle text-left p-3.5 rounded-xl border transition flex items-start gap-3 ${
+                    class="module-toggle text-left p-4 rounded-xl border-2 transition flex items-start gap-3 ${
                       checked
-                        ? 'border-brand-600 bg-brand-50/50 ring-1 ring-brand-600/20'
+                        ? 'border-brand-600 bg-brand-50/60 shadow-xs'
                         : 'border-slate-200 bg-white hover:border-slate-300'
                     }"
                   >
-                    <div class="w-4 h-4 mt-0.5 rounded border flex items-center justify-center shrink-0 ${
+                    <div class="w-5 h-5 mt-0.5 rounded-md border flex items-center justify-center shrink-0 ${
                       checked ? 'bg-brand-700 border-brand-700 text-white' : 'border-slate-300 bg-white'
                     }">
-                      ${checked ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
+                      ${checked ? '<i data-lucide="check" class="w-3.5 h-3.5"></i>' : ''}
                     </div>
                     <div>
-                      <div class="font-semibold text-sm text-slate-900">${m.shortName}</div>
-                      <div class="text-xs text-slate-400 mt-0.5">${m.description}</div>
+                      <div class="font-bold text-base text-slate-900">${m.shortName}</div>
+                      <div class="text-xs sm:text-sm text-slate-500 mt-0.5">${m.description}</div>
                     </div>
                   </button>
                 `;
@@ -515,14 +585,14 @@ function renderStepInfo(ready) {
 function renderBinaryModuleStep(pageTitle, sections, moduleCode) {
   return `
     <div class="space-y-4">
-      <div class="flex items-center justify-between gap-2 px-1">
-        <h2 class="text-base sm:text-lg font-bold text-slate-900">${esc(pageTitle)}</h2>
+      <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+        <h2 class="text-lg sm:text-xl font-bold text-slate-900">${esc(pageTitle)}</h2>
         <button
           type="button"
           data-pass-module="${moduleCode}"
-          class="pass-mod-btn px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 text-xs font-semibold flex items-center gap-1.5 transition"
+          class="pass-mod-btn px-4 py-2 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 text-sm font-semibold flex items-center gap-1.5 transition"
         >
-          <i data-lucide="check-check" class="w-3.5 h-3.5"></i>
+          <i data-lucide="check-check" class="w-4 h-4"></i>
           ผ่านทั้งหมดที่ยังว่าง
         </button>
       </div>
@@ -532,22 +602,22 @@ function renderBinaryModuleStep(pageTitle, sections, moduleCode) {
           const unanswered = sec.items.filter((i) => !draft.answers[i.id]).length;
           return `
             <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-              <div class="px-5 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between gap-2">
-                <h3 class="font-semibold text-sm text-slate-800">${esc(sec.title)}</h3>
-                <div class="flex items-center gap-2.5">
-                  <span class="text-[11px] font-medium ${unanswered === 0 ? 'text-emerald-600' : 'text-slate-400'}">
-                    ${unanswered === 0 ? 'ครบแล้ว' : `ว่าง ${unanswered}`}
+              <div class="px-5 py-3.5 bg-slate-50/90 border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-2">
+                <h3 class="font-bold text-base sm:text-lg text-slate-900">${esc(sec.title)}</h3>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs sm:text-sm font-semibold ${unanswered === 0 ? 'text-emerald-600' : 'text-slate-500'}">
+                    ${unanswered === 0 ? 'ครบแล้ว ✓' : `ว่าง ${unanswered} ข้อ`}
                   </span>
                   <button
                     type="button"
                     data-pass-section="${sec.id}"
-                    class="pass-sec-btn text-xs font-medium text-emerald-700 hover:underline"
+                    class="pass-sec-btn px-3 py-1.5 rounded-lg bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs sm:text-sm font-semibold transition"
                   >
                     ผ่านทั้งหมวด
                   </button>
                 </div>
               </div>
-              <div class="divide-y divide-slate-100/80">
+              <div class="divide-y divide-slate-100">
                 ${sec.items.map((item) => renderQuestionRow(item)).join('')}
               </div>
             </div>
@@ -561,27 +631,27 @@ function renderBinaryModuleStep(pageTitle, sections, moduleCode) {
 function renderQuestionRow(item) {
   const currentVal = draft.answers[item.id] || '';
   return `
-    <div class="px-5 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-slate-50/50 transition">
-      <div class="text-sm text-slate-700 flex-1">
-        ${esc(item.label)}
-        ${!currentVal ? '<span class="text-rose-400 ml-1">•</span>' : ''}
+    <div class="px-4 sm:px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-slate-50/60 transition">
+      <div class="text-[15px] sm:text-base text-slate-800 leading-relaxed flex-1">
+        ${highlightKeywords(item.label)}
+        ${!currentVal ? '<span class="text-rose-500 ml-1 font-bold">•</span>' : ''}
       </div>
-      <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+      <div class="flex flex-wrap items-center gap-2 shrink-0">
         ${item.options
           .map((opt) => {
             const active = currentVal === opt.value;
-            let cls = 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-800';
+            let cls = 'bg-white text-slate-700 border-slate-300 hover:border-slate-400 hover:bg-slate-50';
             if (active) {
-              if (opt.kind === 'pass') cls = 'bg-emerald-600 text-white border-emerald-600';
-              else if (opt.kind === 'fail') cls = 'bg-rose-600 text-white border-rose-600';
-              else cls = 'bg-slate-600 text-white border-slate-600';
+              if (opt.kind === 'pass') cls = 'bg-emerald-600 text-white border-emerald-600 shadow-xs';
+              else if (opt.kind === 'fail') cls = 'bg-rose-600 text-white border-rose-600 shadow-xs';
+              else cls = 'bg-slate-700 text-white border-slate-700 shadow-xs';
             }
             return `
               <button
                 type="button"
                 data-qid="${item.id}"
                 data-val="${esc(opt.value)}"
-                class="ans-btn seg-btn px-3 py-1.5 rounded-lg border text-xs font-medium ${cls}"
+                class="ans-btn seg-btn flex-1 sm:flex-none px-4 py-2 rounded-xl border text-sm sm:text-base font-semibold ${cls}"
               >
                 ${esc(opt.label)}
               </button>
@@ -597,49 +667,49 @@ function renderHaitStep() {
   const haitSummary = computeAuditSummary(draft).modules.HAIT;
   return `
     <div class="space-y-4">
-      <div class="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 flex items-center justify-between gap-3">
+      <div class="bg-white rounded-2xl border border-slate-200/80 p-5 flex items-center justify-between gap-3">
         <div>
-          <h2 class="text-base sm:text-lg font-bold text-slate-900">เกณฑ์คะแนน HA IT</h2>
-          <p class="text-xs text-slate-400">คำนวณคะแนนอัตโนมัติ (หักข้อ NA ออกจากคะแนนเต็ม)</p>
+          <h2 class="text-lg sm:text-xl font-bold text-slate-900">เกณฑ์คะแนน HA IT</h2>
+          <p class="text-sm text-slate-500">คำนวณคะแนนอัตโนมัติ (หักข้อ NA ออกจากคะแนนเต็ม)</p>
         </div>
         <div class="text-right">
-          <div class="text-xl font-bold text-brand-700">${haitSummary.score} / ${haitSummary.maxApplicable}</div>
-          <div class="text-xs text-slate-400">${haitSummary.pct ?? '-'}%</div>
+          <div class="text-2xl font-bold text-brand-700">${haitSummary.score} / ${haitSummary.maxApplicable}</div>
+          <div class="text-sm font-semibold text-slate-500">${haitSummary.pct ?? '-'}%</div>
         </div>
       </div>
 
       ${HAIT_ITEMS.map((item) => {
         const currentVal = draft.answers[item.id] ?? '';
         return `
-          <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-2.5">
+          <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-5 space-y-3">
             <div class="flex items-center justify-between gap-2">
-              <h3 class="font-semibold text-sm text-slate-900">${esc(item.label)}</h3>
-              <span class="text-[11px] text-slate-400 font-medium">เต็ม ${item.maxScore}</span>
+              <h3 class="font-bold text-base sm:text-lg text-slate-900">${highlightKeywords(item.label)}</h3>
+              <span class="text-xs sm:text-sm bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-semibold shrink-0">เต็ม ${item.maxScore}</span>
             </div>
-            ${item.hint ? `<p class="text-xs text-brand-700">${esc(item.hint)}</p>` : ''}
+            ${item.hint ? `<p class="text-sm text-brand-700 font-medium">${esc(item.hint)}</p>` : ''}
 
-            <div class="space-y-1.5 pt-1">
+            <div class="space-y-2 pt-1">
               ${item.options
                 .map((opt) => {
                   const active = String(currentVal) === String(opt.value);
-                  let activeStyle = 'border-slate-200/80 bg-white hover:bg-slate-50 text-slate-600';
+                  let activeStyle = 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700';
                   if (active) {
-                    if (opt.kind === 'pass') activeStyle = 'border-emerald-500 bg-emerald-50/70 text-emerald-900 font-medium';
-                    else if (opt.kind === 'fail') activeStyle = 'border-rose-500 bg-rose-50/70 text-rose-900 font-medium';
-                    else if (opt.kind === 'na') activeStyle = 'border-slate-500 bg-slate-100 text-slate-900 font-medium';
-                    else activeStyle = 'border-brand-600 bg-brand-50/70 text-brand-900 font-medium';
+                    if (opt.kind === 'pass') activeStyle = 'border-emerald-600 bg-emerald-50/80 text-emerald-950 font-medium ring-1 ring-emerald-500';
+                    else if (opt.kind === 'fail') activeStyle = 'border-rose-600 bg-rose-50/80 text-rose-950 font-medium ring-1 ring-rose-500';
+                    else if (opt.kind === 'na') activeStyle = 'border-slate-600 bg-slate-100 text-slate-900 font-medium ring-1 ring-slate-500';
+                    else activeStyle = 'border-brand-600 bg-brand-50/80 text-brand-950 font-medium ring-1 ring-brand-500';
                   }
                   return `
                     <button
                       type="button"
                       data-qid="${item.id}"
                       data-val="${esc(opt.value)}"
-                      class="ans-btn w-full text-left px-3.5 py-2 rounded-xl border text-xs sm:text-sm transition flex items-center gap-2.5 ${activeStyle}"
+                      class="ans-btn seg-btn w-full text-left px-4 py-3 rounded-xl border text-sm sm:text-base leading-relaxed transition flex items-start gap-3 ${activeStyle}"
                     >
-                      <span class="w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-current' : 'border-slate-300'}">
-                        ${active ? '<span class="w-1.5 h-1.5 rounded-full bg-current"></span>' : ''}
+                      <span class="w-4 h-4 mt-1 rounded-full border-2 flex items-center justify-center shrink-0 ${active ? 'border-current' : 'border-slate-300'}">
+                        ${active ? '<span class="w-2 h-2 rounded-full bg-current"></span>' : ''}
                       </span>
-                      <span>${esc(opt.label)}</span>
+                      <span>${formatHaitOption(opt.label)}</span>
                     </button>
                   `;
                 })
@@ -648,7 +718,7 @@ function renderHaitStep() {
 
             ${
               item.allowNote
-                ? `<input id="inp-hait4-note" type="text" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" value="${esc(draft.hait4Note || '')}" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs mt-1 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />`
+                ? `<input id="inp-hait4-note" type="text" placeholder="หมายเหตุเพิ่มเติม (ถ้ามี)" value="${esc(draft.hait4Note || '')}" class="w-full rounded-xl border border-slate-300/90 px-4 py-2.5 text-base mt-1 focus:outline-none focus:ring-2 focus:ring-brand-500/30" />`
                 : ''
             }
           </div>
@@ -662,13 +732,13 @@ function renderRiskStep() {
   return `
     <div class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-2 px-1">
-        <h2 class="text-base sm:text-lg font-bold text-slate-900">ประเมินความเสี่ยง (Pain • Falling • Pressure Injury)</h2>
+        <h2 class="text-lg sm:text-xl font-bold text-slate-900">ประเมินความเสี่ยง (<span class="text-brand-700">Pain • Falling • Pressure Injury</span>)</h2>
         <button
           type="button"
           id="btn-risk-all-none"
-          class="px-3.5 py-1.5 rounded-xl bg-slate-800 text-white hover:bg-slate-900 text-xs font-medium flex items-center gap-1.5 transition"
+          class="px-4 py-2 rounded-xl bg-slate-800 text-white hover:bg-slate-900 text-sm font-semibold flex items-center gap-1.5 transition"
         >
-          <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+          <i data-lucide="zap" class="w-4 h-4"></i>
           ไม่มีปัญหาทั้ง 3 กลุ่ม
         </button>
       </div>
@@ -677,17 +747,17 @@ function renderRiskStep() {
         const allItems = [grp.screenItem, ...grp.followUpItems];
         return `
           <div class="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div class="px-5 py-3 bg-slate-50/70 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+            <div class="px-5 py-3.5 bg-slate-50/90 border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-2.5">
               <div>
-                <h3 class="font-semibold text-sm text-slate-900">${esc(grp.title)}</h3>
-                <p class="text-[11px] text-slate-400">${esc(grp.hint)}</p>
+                <h3 class="font-bold text-base sm:text-lg text-slate-900">${highlightKeywords(grp.title)}</h3>
+                <p class="text-xs sm:text-sm text-slate-500 mt-0.5">${esc(grp.hint)}</p>
               </div>
-              <div class="flex items-center gap-2">
-                <button type="button" data-risk-skip="${grp.id}" class="risk-skip-btn px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 text-xs font-medium">ไม่มีปัญหานี้</button>
-                <button type="button" data-risk-pass="${grp.id}" class="risk-pass-btn px-2.5 py-1 rounded-lg border border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-100 text-xs font-medium">บันทึกถูกต้องครบ</button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" data-risk-skip="${grp.id}" class="risk-skip-btn px-3.5 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 text-xs sm:text-sm font-semibold">ไม่มีปัญหานี้</button>
+                <button type="button" data-risk-pass="${grp.id}" class="risk-pass-btn px-3.5 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-xs sm:text-sm font-semibold">บันทึกถูกต้องครบ</button>
               </div>
             </div>
-            <div class="divide-y divide-slate-100/80">
+            <div class="divide-y divide-slate-100">
               ${allItems.map((item) => renderQuestionRow(item)).join('')}
             </div>
           </div>
