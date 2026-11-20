@@ -269,27 +269,15 @@ function render() {
 // ============================================================
 function renderAuditView() {
   const summary = computeAuditSummary(draft);
-  const steps = getOrderedSteps();
-  if (!steps.some((s) => s.id === activeStep)) activeStep = 'info';
-  const currentIdx = steps.findIndex((s) => s.id === activeStep);
   const effectiveRoom = getEffectiveDraftRoom();
 
-  const stepBadgeCount = (stepId) => {
-    if (stepId === 'NHSO') return summary.modules.NHSO?.unanswered ?? 0;
-    if (stepId === 'HAIT') return summary.modules.HAIT?.unanswered ?? 0;
-    if (stepId === 'MINOR_OR') return summary.modules.MINOR_OR?.unanswered ?? 0;
-    if (stepId === 'NURSE_NOTE') return summary.modules.NURSE_NOTE?.core.unanswered ?? 0;
-    if (stepId === 'RISK') return summary.modules.NURSE_NOTE?.risk.unanswered ?? 0;
-    return 0;
-  };
-
   return `
-    <div class="space-y-5 pb-12">
-      <!-- Minimal Sticky Progress & Score Bar -->
-      <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-xs p-3.5 sm:p-4 sticky top-[72px] z-20">
+    <div class="space-y-6 pb-16">
+      <!-- Ultra-Slim Sticky Score Bar -->
+      <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-xs px-4 py-3 sticky top-[72px] z-20">
         <div class="flex flex-wrap items-center justify-between gap-2.5">
           <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-            <span class="font-bold text-slate-900">HN ${draft.hn ? esc(draft.hn) : '—'}</span>
+            <span class="font-bold text-slate-900">HN <span id="sticky-hn">${draft.hn ? esc(draft.hn) : '—'}</span></span>
             <span class="text-slate-300">•</span>
             <span class="text-slate-500">${formatThaiDate(draft.auditDate)}</span>
             ${
@@ -325,97 +313,33 @@ function renderAuditView() {
             }">รวม ${summary.overallPct ?? '-'}%</span>
           </div>
         </div>
-
-        <!-- Stepper Pills -->
-        <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto">
-          ${steps
-            .map((s) => {
-              const rem = stepBadgeCount(s.id);
-              const isActive = s.id === activeStep;
-              return `
-                <button
-                  data-step="${s.id}"
-                  class="step-btn shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition ${
-                    isActive ? 'step-pill-active' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
-                  }"
-                >
-                  <i data-lucide="${s.icon}" class="w-3.5 h-3.5"></i>
-                  <span>${s.label}</span>
-                  ${
-                    rem > 0
-                      ? `<span class="px-1.5 rounded-full text-[10px] font-bold ${isActive ? 'bg-white/25 text-white' : 'bg-slate-200/80 text-slate-600'}">${rem}</span>`
-                      : s.id !== 'info' && s.id !== 'SUMMARY'
-                        ? `<i data-lucide="check" class="w-3 h-3 ${isActive ? 'text-brand-200' : 'text-emerald-600'}"></i>`
-                        : ''
-                  }
-                </button>
-              `;
-            })
-            .join('')}
-        </div>
       </div>
 
-      <!-- Step Content -->
-      <div id="step-content">
-        ${
-          activeStep === 'info'
-            ? renderStepInfo()
-            : activeStep === 'NHSO'
-              ? renderBinaryModuleStep('OPD สปสช.', NHSO_SECTIONS)
-              : activeStep === 'HAIT'
-                ? renderHaitStep()
-                : activeStep === 'MINOR_OR'
-                  ? renderBinaryModuleStep('ห้องผ่าตัดเล็ก (สปสช.)', MINOR_OR_SECTIONS)
-                  : activeStep === 'NURSE_NOTE'
-                    ? renderBinaryModuleStep('บันทึกทางการพยาบาล (Nurse Note)', NURSE_NOTE_SECTIONS)
-                    : activeStep === 'RISK'
-                      ? renderRiskStep()
-                      : renderSummaryStep(summary)
-        }
-      </div>
+      <!-- Single Scroll Flow -->
+      ${renderStepInfo()}
+      ${draft.selectedModules.includes('NHSO') ? renderBinaryModuleStep('OPD สปสช.', NHSO_SECTIONS, 'NHSO') : ''}
+      ${draft.selectedModules.includes('HAIT') ? renderHaitStep() : ''}
+      ${draft.selectedModules.includes('MINOR_OR') ? renderBinaryModuleStep('ห้องผ่าตัดเล็ก (สปสช.)', MINOR_OR_SECTIONS, 'MINOR_OR') : ''}
+      ${renderBinaryModuleStep('บันทึกทางการพยาบาล (Nurse Note)', NURSE_NOTE_SECTIONS, 'NURSE_NOTE')}
+      ${renderRiskStep()}
+      ${renderSummaryStep(summary)}
 
-      <!-- Bottom Nav -->
-      <div class="flex items-center justify-between pt-1">
+      <!-- Bottom Save Actions -->
+      <div class="flex flex-wrap items-center justify-end gap-2.5 pt-2">
         <button
-          id="btn-prev-step"
-          class="px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5 ${
-            currentIdx === 0 ? 'invisible' : ''
-          }"
+          id="btn-save-audit"
+          class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-xs flex items-center gap-1.5 transition"
         >
-          <i data-lucide="arrow-left" class="w-4 h-4"></i>
-          ย้อนกลับ
+          <i data-lucide="save" class="w-4 h-4"></i>
+          บันทึกผลประเมิน
         </button>
-
-        ${
-          currentIdx < steps.length - 1
-            ? `
-          <button
-            id="btn-next-step"
-            class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
-          >
-            ถัดไป : ${steps[currentIdx + 1].label}
-            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-          </button>
-        `
-            : `
-          <div class="flex flex-wrap items-center gap-2">
-            <button
-              id="btn-save-audit"
-              class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 shadow-xs flex items-center gap-1.5"
-            >
-              <i data-lucide="save" class="w-4 h-4"></i>
-              บันทึกผลประเมิน
-            </button>
-            <button
-              id="btn-save-and-new"
-              class="px-4 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5"
-            >
-              <i data-lucide="plus" class="w-4 h-4"></i>
-              บันทึก &amp; ประเมิน HN ถัดไป
-            </button>
-          </div>
-        `
-        }
+        <button
+          id="btn-save-and-new"
+          class="px-5 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-medium hover:bg-brand-800 shadow-xs flex items-center gap-1.5 transition"
+        >
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          บันทึก &amp; ประเมิน HN ถัดไป
+        </button>
       </div>
     </div>
   `;
@@ -556,15 +480,15 @@ function renderStepInfo() {
   `;
 }
 
-function renderBinaryModuleStep(pageTitle, sections) {
+function renderBinaryModuleStep(pageTitle, sections, moduleCode) {
   return `
     <div class="space-y-4">
       <div class="flex items-center justify-between gap-2 px-1">
         <h2 class="text-base sm:text-lg font-bold text-slate-900">${esc(pageTitle)}</h2>
         <button
           type="button"
-          id="btn-pass-all-tab"
-          class="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 text-xs font-semibold flex items-center gap-1.5 transition"
+          data-pass-module="${moduleCode}"
+          class="pass-mod-btn px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200/80 hover:bg-emerald-100 text-xs font-semibold flex items-center gap-1.5 transition"
         >
           <i data-lucide="check-check" class="w-3.5 h-3.5"></i>
           ผ่านทั้งหมดที่ยังว่าง
@@ -821,44 +745,6 @@ function renderSummaryStep(summary) {
 }
 
 function bindAuditEvents() {
-  document.querySelectorAll('.step-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      applySilentAutoNa();
-      activeStep = btn.dataset.step;
-      render();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    });
-  });
-
-  const steps = getOrderedSteps();
-  const idx = steps.findIndex((s) => s.id === activeStep);
-  document.getElementById('btn-prev-step')?.addEventListener('click', () => {
-    if (idx > 0) {
-      activeStep = steps[idx - 1].id;
-      render();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  });
-  document.getElementById('btn-next-step')?.addEventListener('click', () => {
-    if (activeStep === 'info') {
-      if (!draft.unit || !getEffectiveDraftRoom()) {
-        showToast('กรุณาเลือกหน่วยและห้องตรวจ', 'error');
-        return;
-      }
-      if (!draft.hn.trim()) {
-        showToast('กรุณาระบุ HN', 'error');
-        document.getElementById('inp-hn')?.focus();
-        return;
-      }
-      applySilentAutoNa();
-    }
-    if (idx < steps.length - 1) {
-      activeStep = steps[idx + 1].id;
-      render();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  });
-
   bindThaiDatePicker('audit-date', draft.auditDate, (iso) => {
     draft.auditDate = iso;
     render();
@@ -897,6 +783,8 @@ function bindAuditEvents() {
 
   document.getElementById('inp-hn')?.addEventListener('input', (e) => {
     draft.hn = e.target.value;
+    const stickyHn = document.getElementById('sticky-hn');
+    if (stickyHn) stickyHn.textContent = draft.hn || '—';
   });
   document.getElementById('inp-auditor')?.addEventListener('input', (e) => {
     draft.auditor = e.target.value;
@@ -904,25 +792,32 @@ function bindAuditEvents() {
   document.querySelectorAll('.ptype-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       draft.patientType = btn.dataset.ptype;
+      applySilentAutoNa();
       render();
     });
   });
   document.getElementById('inp-gender')?.addEventListener('change', (e) => {
     draft.gender = e.target.value;
+    applySilentAutoNa();
+    render();
   });
-  document.getElementById('inp-age')?.addEventListener('input', (e) => {
+  document.getElementById('inp-age')?.addEventListener('change', (e) => {
     draft.age = e.target.value;
+    applySilentAutoNa();
+    render();
   });
   document.getElementById('btn-reset-draft')?.addEventListener('click', () => {
     draft = createBlankDraft();
-    activeStep = 'info';
     render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
   document.querySelectorAll('.ans-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       draft.answers[btn.dataset.qid] = btn.dataset.val;
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     });
   });
   document.getElementById('inp-hait4-note')?.addEventListener('input', (e) => {
@@ -938,22 +833,29 @@ function bindAuditEvents() {
         const passOpt = item.options.find((o) => o.kind === 'pass');
         if (passOpt) draft.answers[item.id] = passOpt.value;
       }
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     });
   });
 
-  document.getElementById('btn-pass-all-tab')?.addEventListener('click', () => {
-    const secs =
-      activeStep === 'NHSO' ? NHSO_SECTIONS : activeStep === 'MINOR_OR' ? MINOR_OR_SECTIONS : NURSE_NOTE_SECTIONS;
-    for (const sec of secs) {
-      for (const item of sec.items) {
-        if (!draft.answers[item.id]) {
-          const passOpt = item.options.find((o) => o.kind === 'pass');
-          if (passOpt) draft.answers[item.id] = passOpt.value;
+  document.querySelectorAll('.pass-mod-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const code = btn.dataset.passModule;
+      const secs =
+        code === 'NHSO' ? NHSO_SECTIONS : code === 'MINOR_OR' ? MINOR_OR_SECTIONS : NURSE_NOTE_SECTIONS;
+      for (const sec of secs) {
+        for (const item of sec.items) {
+          if (!draft.answers[item.id]) {
+            const passOpt = item.options.find((o) => o.kind === 'pass');
+            if (passOpt) draft.answers[item.id] = passOpt.value;
+          }
         }
       }
-    }
-    render();
+      const y = window.scrollY;
+      render();
+      window.scrollTo(0, y);
+    });
   });
 
   document.querySelectorAll('.risk-skip-btn').forEach((btn) => {
@@ -962,7 +864,9 @@ function bindAuditEvents() {
       if (!grp) return;
       draft.answers[grp.screenItem.id] = 'ถูกต้อง';
       for (const f of grp.followUpItems) draft.answers[f.id] = 'ไม่มีปัญหานี้';
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     });
   });
   document.querySelectorAll('.risk-pass-btn').forEach((btn) => {
@@ -971,7 +875,9 @@ function bindAuditEvents() {
       if (!grp) return;
       draft.answers[grp.screenItem.id] = 'ถูกต้อง';
       for (const f of grp.followUpItems) draft.answers[f.id] = 'ถูกต้อง';
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     });
   });
   document.getElementById('btn-risk-all-none')?.addEventListener('click', () => {
@@ -979,14 +885,18 @@ function bindAuditEvents() {
       draft.answers[grp.screenItem.id] = 'ถูกต้อง';
       for (const f of grp.followUpItems) draft.answers[f.id] = 'ไม่มีปัญหานี้';
     }
+    const y = window.scrollY;
     render();
+    window.scrollTo(0, y);
   });
 
   document.querySelectorAll('.chip-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const chip = btn.dataset.chip;
       draft.feedback = draft.feedback ? `${draft.feedback}; ${chip}` : chip;
+      const y = window.scrollY;
       render();
+      window.scrollTo(0, y);
     });
   });
   document.getElementById('inp-feedback')?.addEventListener('input', (e) => {
@@ -997,14 +907,13 @@ function bindAuditEvents() {
     const finalRoom = getEffectiveDraftRoom();
     if (!draft.unit || !finalRoom) {
       showToast('กรุณาเลือกหน่วยและห้องตรวจ', 'error');
-      activeStep = 'info';
-      render();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     if (!draft.hn.trim()) {
       showToast('กรุณาระบุ HN', 'error');
-      activeStep = 'info';
-      render();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      document.getElementById('inp-hn')?.focus();
       return;
     }
     const recordToSave = { ...draft, room: finalRoom, isNew: undefined, isDemo: false };
