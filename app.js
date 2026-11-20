@@ -478,33 +478,6 @@ function renderStepInfo() {
             .join('')}
         </div>
       </div>
-
-      <!-- Row 4: Compact Patient Context (Optional, auto-fills N/A) -->
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2 border-t border-slate-100">
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">ประเภทผู้ป่วย</label>
-          <div class="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
-            <button type="button" data-ptype="old" class="ptype-btn py-1.5 rounded-lg text-xs font-medium transition ${
-              draft.patientType === 'old' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-            }">ผู้ป่วยเก่า</button>
-            <button type="button" data-ptype="new" class="ptype-btn py-1.5 rounded-lg text-xs font-medium transition ${
-              draft.patientType === 'new' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
-            }">ผู้ป่วยใหม่</button>
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">เพศ (ถ้าต้องการ)</label>
-          <select id="inp-gender" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/40">
-            <option value="">ไม่ระบุ</option>
-            <option value="male" ${draft.gender === 'male' ? 'selected' : ''}>ชาย</option>
-            <option value="female" ${draft.gender === 'female' ? 'selected' : ''}>หญิง</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1.5">อายุ (ปี)</label>
-          <input id="inp-age" type="number" min="0" max="120" placeholder="เช่น 45" value="${esc(draft.age)}" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/40" />
-        </div>
-      </div>
     </div>
   `;
 }
